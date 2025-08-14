@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:3000'; // Changed from 3001 to 3000
+const API_BASE_URL = 'http://localhost:3000'; // Make sure this matches your backend
 
 export interface SearchResult {
   title: string;
@@ -21,33 +21,61 @@ export interface SearchResponse {
 export const searchAPI = {
   brave: async (query: string, type: string = 'web', location?: string): Promise<SearchResponse> => {
     try {
-      console.log('Making request to:', `${API_BASE_URL}/api/search/brave`);
-      console.log('Request body:', { query, type, location });
+      const url = `${API_BASE_URL}/api/search/brave`;
+      const body = { query, type, location };
       
-      const response = await fetch(`${API_BASE_URL}/api/search/brave`, {
+      console.log('🔍 Frontend making request to:', url);
+      console.log('📤 Request body:', body);
+      console.log('🌐 Full request details:', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ query, type, location }),
+        body: JSON.stringify(body),
       });
 
-      console.log('Response status:', response.status);
+      console.log('📡 Response status:', response.status);
+      console.log('📡 Response ok:', response.ok);
+      console.log('📡 Response headers:', Object.fromEntries(response.headers.entries()));
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ Response error text:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
       
       const data = await response.json();
-      console.log('Response data:', data);
+      console.log('✅ Response data:', data);
       return data;
     } catch (error) {
-      console.error('API Error:', error);
+      console.error('❌ Fetch Error Details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+      
+      // More specific error handling
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        return {
+          success: false,
+          query,
+          results: [],
+          ttsResponse: `Connection failed: Cannot reach backend server at ${API_BASE_URL}. Please ensure the backend is running on port 3000 and check for CORS issues.`,
+          error: 'Connection failed - check backend server and CORS configuration'
+        };
+      }
+      
       return {
         success: false,
         query,
         results: [],
-        ttsResponse: `Network error: ${error.message}. Please check if the backend server is running on port 3000.`,
+        ttsResponse: `Network error: ${error.message}. Error type: ${error.name}`,
         error: error.message
       };
     }
@@ -55,33 +83,49 @@ export const searchAPI = {
 
   exa: async (query: string, type: string = 'neural', includeDomains?: string[]): Promise<SearchResponse> => {
     try {
-      console.log('Making request to:', `${API_BASE_URL}/api/search/exa`);
-      console.log('Request body:', { query, type, includeDomains });
+      const url = `${API_BASE_URL}/api/search/exa`;
+      const body = { query, type, includeDomains };
       
-      const response = await fetch(`${API_BASE_URL}/api/search/exa`, {
+      console.log('🧠 Frontend making Exa request to:', url);
+      console.log('📤 Request body:', body);
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ query, type, includeDomains }),
+        body: JSON.stringify(body),
       });
 
-      console.log('Response status:', response.status);
+      console.log('📡 Exa Response status:', response.status);
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ Exa Response error:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
       
       const data = await response.json();
-      console.log('Response data:', data);
+      console.log('✅ Exa Response data:', data);
       return data;
     } catch (error) {
-      console.error('API Error:', error);
+      console.error('❌ Exa API Error:', error);
+      
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        return {
+          success: false,
+          query,
+          results: [],
+          ttsResponse: `Connection failed: Cannot reach backend server at ${API_BASE_URL}. Please ensure the backend is running on port 3000.`,
+          error: 'Connection failed'
+        };
+      }
+      
       return {
         success: false,
         query,
         results: [],
-        ttsResponse: `Network error: ${error.message}. Please check if the backend server is running on port 3000.`,
+        ttsResponse: `Network error: ${error.message}`,
         error: error.message
       };
     }
@@ -89,33 +133,49 @@ export const searchAPI = {
 
   crypto: async (symbol: string): Promise<SearchResponse> => {
     try {
-      console.log('Making request to:', `${API_BASE_URL}/api/search/crypto`);
-      console.log('Request body:', { symbol });
+      const url = `${API_BASE_URL}/api/search/crypto`;
+      const body = { symbol };
       
-      const response = await fetch(`${API_BASE_URL}/api/search/crypto`, {
+      console.log('💰 Frontend making crypto request to:', url);
+      console.log('📤 Request body:', body);
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ symbol }),
+        body: JSON.stringify(body),
       });
 
-      console.log('Response status:', response.status);
+      console.log('📡 Crypto Response status:', response.status);
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ Crypto Response error:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
       
       const data = await response.json();
-      console.log('Response data:', data);
+      console.log('✅ Crypto Response data:', data);
       return data;
     } catch (error) {
-      console.error('API Error:', error);
+      console.error('❌ Crypto API Error:', error);
+      
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        return {
+          success: false,
+          query: `${symbol} crypto`,
+          results: [],
+          ttsResponse: `Connection failed: Cannot reach backend server at ${API_BASE_URL}. Please ensure the backend is running on port 3000.`,
+          error: 'Connection failed'
+        };
+      }
+      
       return {
         success: false,
         query: `${symbol} crypto`,
         results: [],
-        ttsResponse: `Network error: ${error.message}. Please check if the backend server is running on port 3000.`,
+        ttsResponse: `Network error: ${error.message}`,
         error: error.message
       };
     }
@@ -123,33 +183,49 @@ export const searchAPI = {
 
   restaurants: async (location: string, cuisine?: string, query?: string): Promise<SearchResponse> => {
     try {
-      console.log('Making request to:', `${API_BASE_URL}/api/search/restaurants`);
-      console.log('Request body:', { location, cuisine, query });
+      const url = `${API_BASE_URL}/api/search/restaurants`;
+      const body = { location, cuisine, query };
       
-      const response = await fetch(`${API_BASE_URL}/api/search/restaurants`, {
+      console.log('🍽️ Frontend making restaurant request to:', url);
+      console.log('📤 Request body:', body);
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ location, cuisine, query }),
+        body: JSON.stringify(body),
       });
 
-      console.log('Response status:', response.status);
+      console.log('📡 Restaurant Response status:', response.status);
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ Restaurant Response error:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
       
       const data = await response.json();
-      console.log('Response data:', data);
+      console.log('✅ Restaurant Response data:', data);
       return data;
     } catch (error) {
-      console.error('API Error:', error);
+      console.error('❌ Restaurant API Error:', error);
+      
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        return {
+          success: false,
+          query: query || 'restaurants',
+          results: [],
+          ttsResponse: `Connection failed: Cannot reach backend server at ${API_BASE_URL}. Please ensure the backend is running on port 3000.`,
+          error: 'Connection failed'
+        };
+      }
+      
       return {
         success: false,
         query: query || 'restaurants',
         results: [],
-        ttsResponse: `Network error: ${error.message}. Please check if the backend server is running on port 3000.`,
+        ttsResponse: `Network error: ${error.message}`,
         error: error.message
       };
     }
