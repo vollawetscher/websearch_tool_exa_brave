@@ -49,13 +49,22 @@ console.log('EXA_API_KEY:', process.env.EXA_API_KEY ? `SET (${process.env.EXA_AP
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enhanced CORS configuration
+// FIXED: Enhanced CORS configuration to allow frontend origin
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  origin: [
+    'http://localhost:5173', 
+    'http://localhost:5174', 
+    'http://127.0.0.1:5173', 
+    'http://127.0.0.1:5174'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200 // For legacy browser support
 }));
+
+// Add explicit preflight handling
+app.options('*', cors());
 
 app.use(express.json());
 
@@ -65,6 +74,9 @@ app.get('/health', (req, res) => {
     status: 'OK', 
     message: 'ElevenLabs Voice Search Tool API is running',
     timestamp: new Date().toISOString(),
+    cors: {
+      allowedOrigins: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174']
+    },
     env: {
       braveApiKey: !!process.env.BRAVE_API_KEY,
       exaApiKey: !!process.env.EXA_API_KEY,
@@ -83,13 +95,15 @@ app.get('/health', (req, res) => {
 app.get('/api/test', (req, res) => {
   res.json({ 
     message: 'API connection successful!',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    cors: 'CORS headers should be working now'
   });
 });
 
 // Brave Search API endpoint
 app.post('/api/search/brave', async (req, res) => {
   console.log('🔍 Brave Search Request:', req.body);
+  console.log('🌐 Request Origin:', req.get('Origin'));
   
   try {
     const { query, type = 'web', count = 10, location = null } = req.body;
@@ -176,6 +190,7 @@ app.post('/api/search/brave', async (req, res) => {
 // Exa.ai Search API endpoint
 app.post('/api/search/exa', async (req, res) => {
   console.log('🧠 Exa Search Request:', req.body);
+  console.log('🌐 Request Origin:', req.get('Origin'));
   
   try {
     const { query, type = 'neural', numResults = 10, includeDomains = null } = req.body;
@@ -262,6 +277,7 @@ app.post('/api/search/exa', async (req, res) => {
 // Specialized search endpoints
 app.post('/api/search/crypto', async (req, res) => {
   console.log('💰 Crypto Search Request:', req.body);
+  console.log('🌐 Request Origin:', req.get('Origin'));
   
   try {
     const { symbol } = req.body;
@@ -323,6 +339,7 @@ app.post('/api/search/crypto', async (req, res) => {
 
 app.post('/api/search/restaurants', async (req, res) => {
   console.log('🍽️ Restaurant Search Request:', req.body);
+  console.log('🌐 Request Origin:', req.get('Origin'));
   
   try {
     const { location, cuisine = '', query = 'restaurants' } = req.body;
@@ -388,4 +405,5 @@ app.listen(PORT, () => {
   console.log(`📡 API endpoints available at http://localhost:${PORT}/api`);
   console.log(`🔑 API Keys configured: Brave=${!!process.env.BRAVE_API_KEY}, Exa=${!!process.env.EXA_API_KEY}`);
   console.log(`🌐 Health check: http://localhost:${PORT}/health`);
+  console.log(`✅ CORS configured for origins: http://localhost:5173, http://localhost:5174`);
 });
