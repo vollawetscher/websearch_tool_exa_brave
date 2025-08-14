@@ -187,7 +187,7 @@ app.post('/api/search/brave', async (req, res) => {
   }
 });
 
-// Exa.ai Search API endpoint
+// FIXED: Exa.ai Search API endpoint with correct request format
 app.post('/api/search/exa', async (req, res) => {
   console.log('🧠 Exa Search Request:', req.body);
   console.log('🌐 Request Origin:', req.get('Origin'));
@@ -205,37 +205,45 @@ app.post('/api/search/exa', async (req, res) => {
       });
     }
     
+    // FIXED: Correct Exa API request format
     const searchData = {
-      query,
-      type,
-      numResults,
+      query: query,
+      numResults: Math.min(numResults, 10), // Exa has limits
       contents: {
         text: true,
         highlights: true,
         summary: true
-      }
+      },
+      useAutoprompt: true, // Let Exa optimize the query
+      type: type === 'neural' ? 'neural' : 'keyword'
     };
 
-    if (includeDomains) {
+    // Only add includeDomains if provided and is an array
+    if (includeDomains && Array.isArray(includeDomains) && includeDomains.length > 0) {
       searchData.includeDomains = includeDomains;
     }
 
-    console.log('📡 Making request to Exa API with data:', searchData);
+    console.log('📡 Making request to Exa API with data:', JSON.stringify(searchData, null, 2));
+    console.log('🔑 Using API key:', process.env.EXA_API_KEY ? `${process.env.EXA_API_KEY.substring(0, 10)}...` : 'NOT SET');
 
     const response = await axios.post('https://api.exa.ai/search', searchData, {
       headers: {
         'x-api-key': process.env.EXA_API_KEY,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
       },
-      timeout: 10000 // 10 second timeout
+      timeout: 15000 // 15 second timeout for AI search
     });
 
     console.log('✅ Exa API Response Status:', response.status);
+    console.log('📊 Exa API Response Data Keys:', Object.keys(response.data));
 
     const results = response.data.results || [];
+    console.log(`📋 Found ${results.length} results from Exa`);
+
     const formattedResults = results.slice(0, 5).map(result => ({
-      title: result.title,
-      snippet: result.summary || result.text?.substring(0, 200) + '...',
+      title: result.title || 'Untitled',
+      snippet: result.summary || result.text?.substring(0, 200) + '...' || result.highlights?.join(' ') || 'No description available',
       url: result.url,
       score: result.score,
       publishedDate: result.publishedDate
@@ -260,16 +268,41 @@ app.post('/api/search/exa', async (req, res) => {
       totalResults: results.length
     };
 
-    console.log('📤 Sending response:', { ...responseData, results: `${formattedResults.length} results` });
+    console.log('📤 Sending Exa response:', { ...responseData, results: `${formattedResults.length} results` });
 
     res.json(responseData);
 
   } catch (error) {
-    console.error('❌ Exa Search Error:', error.response?.data || error.message);
+    console.error('❌ Exa Search Error Details:');
+    console.error('Error message:', error.message);
+    console.error('Error response status:', error.response?.status);
+    console.error('Error response data:', error.response?.data);
+    console.error('Error response headers:', error.response?.headers);
+    
+    // More specific error handling for Exa API
+    let errorMessage = 'AI search failed';
+    let ttsMessage = `I encountered an error while performing AI search with Exa. ${error.message}. Please try again.`;
+    
+    if (error.response?.status === 400) {
+      errorMessage = 'Invalid request to Exa API';
+      ttsMessage = 'The AI search request was invalid. This might be due to API key issues or request format problems.';
+    } else if (error.response?.status === 401) {
+      errorMessage = 'Exa API authentication failed';
+      ttsMessage = 'The Exa API key is invalid or expired. Please check your API key configuration.';
+    } else if (error.response?.status === 429) {
+      errorMessage = 'Exa API rate limit exceeded';
+      ttsMessage = 'The AI search service is currently rate limited. Please try again in a moment.';
+    }
+    
     res.status(500).json({
       success: false,
-      error: 'AI search failed',
-      ttsResponse: `I encountered an error while performing AI search with Exa. ${error.message}. Please try again.`
+      error: errorMessage,
+      ttsResponse: ttsMessage,
+      debug: {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data
+      }
     });
   }
 });
