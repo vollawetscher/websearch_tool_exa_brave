@@ -68,6 +68,111 @@ app.options('*', cors());
 
 app.use(express.json());
 
+// ADDED: Helper function to clean text for TTS
+function cleanTextForTTS(text) {
+  if (!text) return '';
+  
+  return text
+    // Remove HTML tags
+    .replace(/<[^>]*>/g, '')
+    // Remove extra whitespace and normalize spaces
+    .replace(/\s+/g, ' ')
+    // Remove special characters that don't sound good in TTS
+    .replace(/[•·]/g, '')
+    // Replace common abbreviations with full words
+    .replace(/\bw\//g, 'with ')
+    .replace(/\b&\b/g, 'and ')
+    .replace(/\bvs\b/g, 'versus ')
+    .replace(/\be\.g\./g, 'for example')
+    .replace(/\bi\.e\./g, 'that is')
+    // Remove URLs (they sound terrible in TTS)
+    .replace(/https?:\/\/[^\s]+/g, '')
+    // Remove email addresses
+    .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '')
+    // Clean up punctuation for better speech flow
+    .replace(/\.\.\./g, '.')
+    .replace(/--/g, ' - ')
+    // Remove excessive punctuation
+    .replace(/[!]{2,}/g, '!')
+    .replace(/[?]{2,}/g, '?')
+    // Trim and clean up
+    .trim()
+    // Ensure sentences end properly
+    .replace(/([a-zA-Z])$/, '$1.');
+}
+
+// ADDED: Helper function to check if a result is a listing/directory page
+function isListingPage(title, description, url) {
+  const listingKeywords = [
+    'best restaurants', 'top restaurants', 'tripadvisor', 'yelp', 'opentable',
+    'restaurant guide', 'dining guide', 'restaurant list', 'find restaurants',
+    'restaurant directory', 'restaurant reviews', 'book a table', 'reservation',
+    'restaurants in', 'updated 2024', 'updated 2025'
+  ];
+  
+  const titleLower = title.toLowerCase();
+  const descLower = description.toLowerCase();
+  const urlLower = url.toLowerCase();
+  
+  return listingKeywords.some(keyword => 
+    titleLower.includes(keyword) || 
+    descLower.includes(keyword) ||
+    urlLower.includes('tripadvisor') ||
+    urlLower.includes('yelp') ||
+    urlLower.includes('opentable')
+  );
+}
+
+// ADDED: Helper function to extract actual restaurant names and info
+function extractRestaurantInfo(results) {
+  const restaurants = [];
+  
+  for (const result of results) {
+    const title = result.title || '';
+    const description = result.description || '';
+    const url = result.url || '';
+    
+    // Skip obvious listing pages
+    if (isListingPage(title, description, url)) {
+      continue;
+    }
+    
+    // Look for actual restaurant names and information
+    const titleLower = title.toLowerCase();
+    const descLower = description.toLowerCase();
+    
+    // Check if this looks like an actual restaurant
+    const restaurantIndicators = [
+      'restaurant', 'bistro', 'cafe', 'taverna', 'trattoria', 'pizzeria',
+      'steakhouse', 'grill', 'bar', 'kitchen', 'house', 'place'
+    ];
+    
+    const hasRestaurantIndicator = restaurantIndicators.some(indicator => 
+      titleLower.includes(indicator) || descLower.includes(indicator)
+    );
+    
+    // Check for menu, location, or contact info (signs of actual restaurant)
+    const hasRestaurantInfo = descLower.includes('menu') || 
+                             descLower.includes('address') || 
+                             descLower.includes('phone') ||
+                             descLower.includes('hours') ||
+                             descLower.includes('cuisine') ||
+                             descLower.includes('dishes') ||
+                             descLower.includes('food');
+    
+    if (hasRestaurantIndicator || hasRestaurantInfo) {
+      restaurants.push({
+        title: cleanTextForTTS(title),
+        snippet: cleanTextForTTS(description),
+        url: url,
+        isActualRestaurant: true
+      });
+    }
+  }
+  
+  return restaurants;
+}
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ 
@@ -148,8 +253,8 @@ app.post('/api/search/brave', async (req, res) => {
     // Format response for TTS compatibility
     const results = response.data.web?.results || [];
     const formattedResults = results.slice(0, 5).map(result => ({
-      title: result.title,
-      snippet: result.description,
+      title: cleanTextForTTS(result.title),
+      snippet: cleanTextForTTS(result.description),
       url: result.url,
       published: result.age
     }));
@@ -159,11 +264,16 @@ app.post('/api/search/brave', async (req, res) => {
     if (formattedResults.length > 0) {
       ttsResponse = `I found ${formattedResults.length} relevant results for "${query}". `;
       formattedResults.forEach((result, index) => {
-        ttsResponse += `${index + 1}. ${result.title}. ${result.snippet}. `;
+        const cleanTitle = cleanTextForTTS(result.title);
+        const cleanSnippet = cleanTextForTTS(result.snippet);
+        ttsResponse += `${index + 1}. ${cleanTitle}. ${cleanSnippet}. `;
       });
     } else {
       ttsResponse = `I couldn't find any results for "${query}". You might want to try a different search term.`;
     }
+
+    // Final cleanup of the entire TTS response
+    ttsResponse = cleanTextForTTS(ttsResponse);
 
     const responseData = {
       success: true,
@@ -242,8 +352,8 @@ app.post('/api/search/exa', async (req, res) => {
     console.log(`📋 Found ${results.length} results from Exa`);
 
     const formattedResults = results.slice(0, 5).map(result => ({
-      title: result.title || 'Untitled',
-      snippet: result.summary || result.text?.substring(0, 200) + '...' || result.highlights?.join(' ') || 'No description available',
+      title: cleanTextForTTS(result.title || 'Untitled'),
+      snippet: cleanTextForTTS(result.summary || result.text?.substring(0, 200) + '...' || result.highlights?.join(' ') || 'No description available'),
       url: result.url,
       score: result.score,
       publishedDate: result.publishedDate
@@ -254,11 +364,16 @@ app.post('/api/search/exa', async (req, res) => {
     if (formattedResults.length > 0) {
       ttsResponse = `Using advanced AI search, I found ${formattedResults.length} highly relevant results for "${query}". `;
       formattedResults.forEach((result, index) => {
-        ttsResponse += `${index + 1}. ${result.title}. ${result.snippet}. `;
+        const cleanTitle = cleanTextForTTS(result.title);
+        const cleanSnippet = cleanTextForTTS(result.snippet);
+        ttsResponse += `${index + 1}. ${cleanTitle}. ${cleanSnippet}. `;
       });
     } else {
       ttsResponse = `I couldn't find any results for "${query}" using AI search. You might want to try a different approach.`;
     }
+
+    // Final cleanup of the entire TTS response
+    ttsResponse = cleanTextForTTS(ttsResponse);
 
     const responseData = {
       success: true,
@@ -346,17 +461,26 @@ app.post('/api/search/crypto', async (req, res) => {
 
     let ttsResponse = '';
     if (cryptoInfo) {
-      ttsResponse = `Here's the latest information on ${symbol}: ${cryptoInfo.description}`;
+      const cleanDescription = cleanTextForTTS(cryptoInfo.description);
+      ttsResponse = `Here's the latest information on ${symbol}: ${cleanDescription}`;
     } else if (results.length > 0) {
-      ttsResponse = `I found some information about ${symbol}: ${results[0].description}`;
+      const cleanDescription = cleanTextForTTS(results[0].description);
+      ttsResponse = `I found some information about ${symbol}: ${cleanDescription}`;
     } else {
       ttsResponse = `I couldn't find current price information for ${symbol}. The cryptocurrency market data might be temporarily unavailable.`;
     }
 
+    // Clean the final TTS response
+    ttsResponse = cleanTextForTTS(ttsResponse);
+
     res.json({
       success: true,
       query: `${symbol} crypto price`,
-      results: results.slice(0, 3),
+      results: results.slice(0, 3).map(result => ({
+        ...result,
+        title: cleanTextForTTS(result.title),
+        description: cleanTextForTTS(result.description)
+      })),
       ttsResponse
     });
 
@@ -370,13 +494,13 @@ app.post('/api/search/crypto', async (req, res) => {
   }
 });
 
+// IMPROVED: Restaurant search with better filtering and multiple search strategies
 app.post('/api/search/restaurants', async (req, res) => {
   console.log('🍽️ Restaurant Search Request:', req.body);
   console.log('🌐 Request Origin:', req.get('Origin'));
   
   try {
     const { location, cuisine = '', query = 'restaurants' } = req.body;
-    const searchQuery = `${cuisine} ${query} near ${location} reviews ratings`;
     
     if (!process.env.BRAVE_API_KEY) {
       return res.status(500).json({
@@ -386,41 +510,102 @@ app.post('/api/search/restaurants', async (req, res) => {
       });
     }
     
-    const response = await axios.get('https://api.search.brave.com/res/v1/web/search', {
-      headers: {
-        'X-Subscription-Token': process.env.BRAVE_API_KEY,
-        'Accept': 'application/json'
-      },
-      params: {
-        q: searchQuery,
-        count: 8,
-        location: location
-      },
-      timeout: 10000
-    });
+    // Try multiple search strategies to get actual restaurants
+    const searchStrategies = [
+      // Strategy 1: Specific restaurant names with cuisine and location
+      `"${cuisine}" restaurant "${location}" menu address phone`,
+      // Strategy 2: Local restaurant names
+      `${cuisine} restaurant ${location} -tripadvisor -yelp -opentable -"best restaurants"`,
+      // Strategy 3: Restaurant names with reviews but exclude listing sites
+      `${cuisine} ${location} restaurant review -"top 10" -"best restaurants" -directory`
+    ];
+    
+    let allResults = [];
+    let bestResults = [];
+    
+    // Try each search strategy
+    for (let i = 0; i < searchStrategies.length && bestResults.length < 5; i++) {
+      const searchQuery = searchStrategies[i];
+      console.log(`🔍 Trying search strategy ${i + 1}: ${searchQuery}`);
+      
+      try {
+        const response = await axios.get('https://api.search.brave.com/res/v1/web/search', {
+          headers: {
+            'X-Subscription-Token': process.env.BRAVE_API_KEY,
+            'Accept': 'application/json'
+          },
+          params: {
+            q: searchQuery,
+            count: 10,
+            location: location
+          },
+          timeout: 10000
+        });
 
-    const results = response.data.web?.results || [];
-    const restaurants = results.filter(r => 
-      r.title.toLowerCase().includes('restaurant') || 
-      r.description.toLowerCase().includes('restaurant') ||
-      r.description.toLowerCase().includes('dining')
-    ).slice(0, 5);
-
+        const results = response.data.web?.results || [];
+        allResults = allResults.concat(results);
+        
+        // Extract actual restaurants from this batch
+        const restaurants = extractRestaurantInfo(results);
+        bestResults = bestResults.concat(restaurants);
+        
+        console.log(`📋 Strategy ${i + 1} found ${restaurants.length} actual restaurants`);
+        
+      } catch (error) {
+        console.log(`⚠️ Strategy ${i + 1} failed:`, error.message);
+        continue;
+      }
+    }
+    
+    // Remove duplicates based on title similarity
+    const uniqueRestaurants = [];
+    const seenTitles = new Set();
+    
+    for (const restaurant of bestResults) {
+      const titleKey = restaurant.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!seenTitles.has(titleKey) && uniqueRestaurants.length < 5) {
+        seenTitles.add(titleKey);
+        uniqueRestaurants.push(restaurant);
+      }
+    }
+    
+    console.log(`🎯 Final result: ${uniqueRestaurants.length} unique restaurants found`);
+    
+    // Create TTS response
     let ttsResponse = '';
-    if (restaurants.length > 0) {
-      ttsResponse = `I found ${restaurants.length} great ${cuisine} restaurant options near ${location}. `;
-      restaurants.forEach((restaurant, index) => {
-        ttsResponse += `${index + 1}. ${restaurant.title}. ${restaurant.description}. `;
+    if (uniqueRestaurants.length > 0) {
+      const cuisineText = cuisine ? `${cuisine} ` : '';
+      ttsResponse = `I found ${uniqueRestaurants.length} ${cuisineText}restaurant recommendations in ${location}. `;
+      
+      uniqueRestaurants.forEach((restaurant, index) => {
+        // Extract just the restaurant name from the title (remove extra text)
+        let restaurantName = restaurant.title;
+        // Remove common suffixes that aren't part of the name
+        restaurantName = restaurantName.replace(/ - Restaurant.*$/i, '');
+        restaurantName = restaurantName.replace(/ Restaurant.*$/i, '');
+        restaurantName = restaurantName.replace(/ \| .*$/i, '');
+        
+        ttsResponse += `${index + 1}. ${restaurantName}. ${restaurant.snippet}. `;
       });
     } else {
-      ttsResponse = `I couldn't find specific restaurant information for ${cuisine} cuisine near ${location}. You might want to try a broader search.`;
+      // Fallback: provide general guidance
+      const cuisineText = cuisine ? `${cuisine} ` : '';
+      ttsResponse = `I couldn't find specific ${cuisineText}restaurant recommendations in ${location} right now. I suggest checking local dining guides or asking locals for their favorite ${cuisineText}restaurants in the area.`;
     }
+
+    // Final cleanup of the entire TTS response
+    ttsResponse = cleanTextForTTS(ttsResponse);
 
     res.json({
       success: true,
-      query: searchQuery,
-      results: restaurants,
-      ttsResponse
+      query: `${cuisine} restaurants in ${location}`,
+      results: uniqueRestaurants.slice(0, 5),
+      ttsResponse,
+      debug: {
+        totalResultsFound: allResults.length,
+        actualRestaurantsFound: bestResults.length,
+        uniqueRestaurants: uniqueRestaurants.length
+      }
     });
 
   } catch (error) {
@@ -428,7 +613,7 @@ app.post('/api/search/restaurants', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Restaurant search failed',
-      ttsResponse: `I encountered an error while searching for restaurants near ${req.body.location}. ${error.message}.`
+      ttsResponse: `I encountered an error while searching for restaurants in ${req.body.location}. ${error.message}.`
     });
   }
 });
