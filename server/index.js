@@ -2,8 +2,49 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import axios from 'axios';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { existsSync } from 'fs';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Enhanced dotenv loading with multiple fallback paths
+const envPaths = [
+  '.env',
+  '../.env',
+  join(process.cwd(), '.env'),
+  join(__dirname, '.env'),
+  join(__dirname, '../.env')
+];
+
+console.log('🔍 Loading environment variables...');
+console.log('Current working directory:', process.cwd());
+console.log('Script directory:', __dirname);
+
+let envLoaded = false;
+for (const envPath of envPaths) {
+  if (existsSync(envPath)) {
+    console.log(`📁 Found .env file at: ${envPath}`);
+    const result = dotenv.config({ path: envPath });
+    if (!result.error) {
+      console.log('✅ Successfully loaded .env file');
+      envLoaded = true;
+      break;
+    } else {
+      console.log(`❌ Error loading ${envPath}:`, result.error.message);
+    }
+  }
+}
+
+if (!envLoaded) {
+  console.log('⚠️  No .env file found or loaded. Checking for environment variables...');
+}
+
+// Debug environment variables
+console.log('🔑 Environment Variables Status:');
+console.log('BRAVE_API_KEY:', process.env.BRAVE_API_KEY ? `SET (${process.env.BRAVE_API_KEY.substring(0, 10)}...)` : 'NOT SET');
+console.log('EXA_API_KEY:', process.env.EXA_API_KEY ? `SET (${process.env.EXA_API_KEY.substring(0, 10)}...)` : 'NOT SET');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,7 +67,14 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     env: {
       braveApiKey: !!process.env.BRAVE_API_KEY,
-      exaApiKey: !!process.env.EXA_API_KEY
+      exaApiKey: !!process.env.EXA_API_KEY,
+      braveKeyPreview: process.env.BRAVE_API_KEY ? process.env.BRAVE_API_KEY.substring(0, 10) + '...' : 'NOT SET',
+      exaKeyPreview: process.env.EXA_API_KEY ? process.env.EXA_API_KEY.substring(0, 10) + '...' : 'NOT SET'
+    },
+    debug: {
+      cwd: process.cwd(),
+      dirname: __dirname,
+      nodeEnv: process.env.NODE_ENV || 'NOT SET'
     }
   });
 });
@@ -48,6 +96,7 @@ app.post('/api/search/brave', async (req, res) => {
     
     if (!process.env.BRAVE_API_KEY) {
       console.error('❌ BRAVE_API_KEY not found in environment variables');
+      console.error('Available env vars:', Object.keys(process.env).filter(k => k.includes('API')));
       return res.status(500).json({
         success: false,
         error: 'BRAVE_API_KEY not configured',
@@ -133,6 +182,7 @@ app.post('/api/search/exa', async (req, res) => {
     
     if (!process.env.EXA_API_KEY) {
       console.error('❌ EXA_API_KEY not found in environment variables');
+      console.error('Available env vars:', Object.keys(process.env).filter(k => k.includes('API')));
       return res.status(500).json({
         success: false,
         error: 'EXA_API_KEY not configured',
