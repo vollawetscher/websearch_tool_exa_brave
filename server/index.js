@@ -8,13 +8,52 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+// Enhanced CORS configuration
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'ElevenLabs Voice Search Tool API is running',
+    timestamp: new Date().toISOString(),
+    env: {
+      braveApiKey: !!process.env.BRAVE_API_KEY,
+      exaApiKey: !!process.env.EXA_API_KEY
+    }
+  });
+});
+
+// Test endpoint
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    message: 'API connection successful!',
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Brave Search API endpoint
 app.post('/api/search/brave', async (req, res) => {
+  console.log('🔍 Brave Search Request:', req.body);
+  
   try {
     const { query, type = 'web', count = 10, location = null } = req.body;
+    
+    if (!process.env.BRAVE_API_KEY) {
+      console.error('❌ BRAVE_API_KEY not found in environment variables');
+      return res.status(500).json({
+        success: false,
+        error: 'BRAVE_API_KEY not configured',
+        ttsResponse: 'The Brave API key is not configured. Please check your environment variables.'
+      });
+    }
     
     const params = {
       q: query,
@@ -30,13 +69,18 @@ app.post('/api/search/brave', async (req, res) => {
       params.location = location;
     }
 
+    console.log('📡 Making request to Brave API with params:', params);
+
     const response = await axios.get('https://api.search.brave.com/res/v1/web/search', {
       headers: {
         'X-Subscription-Token': process.env.BRAVE_API_KEY,
         'Accept': 'application/json'
       },
-      params
+      params,
+      timeout: 10000 // 10 second timeout
     });
+
+    console.log('✅ Brave API Response Status:', response.status);
 
     // Format response for TTS compatibility
     const results = response.data.web?.results || [];
@@ -58,28 +102,43 @@ app.post('/api/search/brave', async (req, res) => {
       ttsResponse = `I couldn't find any results for "${query}". You might want to try a different search term.`;
     }
 
-    res.json({
+    const responseData = {
       success: true,
       query,
       results: formattedResults,
       ttsResponse,
       totalResults: response.data.web?.totalResults || 0
-    });
+    };
+
+    console.log('📤 Sending response:', { ...responseData, results: `${formattedResults.length} results` });
+
+    res.json(responseData);
 
   } catch (error) {
-    console.error('Brave Search Error:', error.response?.data || error.message);
+    console.error('❌ Brave Search Error:', error.response?.data || error.message);
     res.status(500).json({
       success: false,
       error: 'Search failed',
-      ttsResponse: 'I encountered an error while searching. Please try again.'
+      ttsResponse: `I encountered an error while searching with Brave. ${error.message}. Please try again.`
     });
   }
 });
 
 // Exa.ai Search API endpoint
 app.post('/api/search/exa', async (req, res) => {
+  console.log('🧠 Exa Search Request:', req.body);
+  
   try {
     const { query, type = 'neural', numResults = 10, includeDomains = null } = req.body;
+    
+    if (!process.env.EXA_API_KEY) {
+      console.error('❌ EXA_API_KEY not found in environment variables');
+      return res.status(500).json({
+        success: false,
+        error: 'EXA_API_KEY not configured',
+        ttsResponse: 'The Exa API key is not configured. Please check your environment variables.'
+      });
+    }
     
     const searchData = {
       query,
@@ -96,12 +155,17 @@ app.post('/api/search/exa', async (req, res) => {
       searchData.includeDomains = includeDomains;
     }
 
+    console.log('📡 Making request to Exa API with data:', searchData);
+
     const response = await axios.post('https://api.exa.ai/search', searchData, {
       headers: {
         'x-api-key': process.env.EXA_API_KEY,
         'Content-Type': 'application/json'
-      }
+      },
+      timeout: 10000 // 10 second timeout
     });
+
+    console.log('✅ Exa API Response Status:', response.status);
 
     const results = response.data.results || [];
     const formattedResults = results.slice(0, 5).map(result => ({
@@ -123,29 +187,43 @@ app.post('/api/search/exa', async (req, res) => {
       ttsResponse = `I couldn't find any results for "${query}" using AI search. You might want to try a different approach.`;
     }
 
-    res.json({
+    const responseData = {
       success: true,
       query,
       results: formattedResults,
       ttsResponse,
       totalResults: results.length
-    });
+    };
+
+    console.log('📤 Sending response:', { ...responseData, results: `${formattedResults.length} results` });
+
+    res.json(responseData);
 
   } catch (error) {
-    console.error('Exa Search Error:', error.response?.data || error.message);
+    console.error('❌ Exa Search Error:', error.response?.data || error.message);
     res.status(500).json({
       success: false,
       error: 'AI search failed',
-      ttsResponse: 'I encountered an error while performing AI search. Please try again.'
+      ttsResponse: `I encountered an error while performing AI search with Exa. ${error.message}. Please try again.`
     });
   }
 });
 
 // Specialized search endpoints
 app.post('/api/search/crypto', async (req, res) => {
+  console.log('💰 Crypto Search Request:', req.body);
+  
   try {
     const { symbol } = req.body;
     const query = `${symbol} cryptocurrency price current market cap`;
+    
+    if (!process.env.BRAVE_API_KEY) {
+      return res.status(500).json({
+        success: false,
+        error: 'BRAVE_API_KEY not configured',
+        ttsResponse: 'The Brave API key is not configured for crypto search.'
+      });
+    }
     
     // Use Brave search for crypto data
     const response = await axios.get('https://api.search.brave.com/res/v1/web/search', {
@@ -157,7 +235,8 @@ app.post('/api/search/crypto', async (req, res) => {
         q: query,
         count: 5,
         freshness: 'pd'
-      }
+      },
+      timeout: 10000
     });
 
     const results = response.data.web?.results || [];
@@ -169,6 +248,8 @@ app.post('/api/search/crypto', async (req, res) => {
     let ttsResponse = '';
     if (cryptoInfo) {
       ttsResponse = `Here's the latest information on ${symbol}: ${cryptoInfo.description}`;
+    } else if (results.length > 0) {
+      ttsResponse = `I found some information about ${symbol}: ${results[0].description}`;
     } else {
       ttsResponse = `I couldn't find current price information for ${symbol}. The cryptocurrency market data might be temporarily unavailable.`;
     }
@@ -181,18 +262,29 @@ app.post('/api/search/crypto', async (req, res) => {
     });
 
   } catch (error) {
+    console.error('❌ Crypto Search Error:', error.response?.data || error.message);
     res.status(500).json({
       success: false,
       error: 'Crypto search failed',
-      ttsResponse: 'I encountered an error while searching for cryptocurrency information.'
+      ttsResponse: `I encountered an error while searching for ${req.body.symbol} cryptocurrency information. ${error.message}.`
     });
   }
 });
 
 app.post('/api/search/restaurants', async (req, res) => {
+  console.log('🍽️ Restaurant Search Request:', req.body);
+  
   try {
     const { location, cuisine = '', query = 'restaurants' } = req.body;
     const searchQuery = `${cuisine} ${query} near ${location} reviews ratings`;
+    
+    if (!process.env.BRAVE_API_KEY) {
+      return res.status(500).json({
+        success: false,
+        error: 'BRAVE_API_KEY not configured',
+        ttsResponse: 'The Brave API key is not configured for restaurant search.'
+      });
+    }
     
     const response = await axios.get('https://api.search.brave.com/res/v1/web/search', {
       headers: {
@@ -203,7 +295,8 @@ app.post('/api/search/restaurants', async (req, res) => {
         q: searchQuery,
         count: 8,
         location: location
-      }
+      },
+      timeout: 10000
     });
 
     const results = response.data.web?.results || [];
@@ -231,10 +324,11 @@ app.post('/api/search/restaurants', async (req, res) => {
     });
 
   } catch (error) {
+    console.error('❌ Restaurant Search Error:', error.response?.data || error.message);
     res.status(500).json({
       success: false,
       error: 'Restaurant search failed',
-      ttsResponse: 'I encountered an error while searching for restaurants.'
+      ttsResponse: `I encountered an error while searching for restaurants near ${req.body.location}. ${error.message}.`
     });
   }
 });
@@ -242,4 +336,6 @@ app.post('/api/search/restaurants', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 ElevenLabs Voice Search Tool server running on port ${PORT}`);
   console.log(`📡 API endpoints available at http://localhost:${PORT}/api`);
+  console.log(`🔑 API Keys configured: Brave=${!!process.env.BRAVE_API_KEY}, Exa=${!!process.env.EXA_API_KEY}`);
+  console.log(`🌐 Health check: http://localhost:${PORT}/health`);
 });
