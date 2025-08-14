@@ -4,6 +4,7 @@ import SearchInterface from './components/SearchInterface';
 import ApiKeyManager from './components/ApiKeyManager';
 import SearchResults from './components/SearchResults';
 import VoiceAgentDemo from './components/VoiceAgentDemo';
+import { searchAPI } from './utils/api';
 
 interface SearchResult {
   title: string;
@@ -30,16 +31,25 @@ function App() {
   const handleSearch = async (searchData: any) => {
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:3001/api/search/${searchData.engine}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(searchData),
-      });
-      
-      const data = await response.json();
-      setSearchResults(data);
+      let result: SearchResponse;
+
+      // Route to appropriate search API based on type and engine
+      if (searchData.type === 'crypto') {
+        result = await searchAPI.crypto(searchData.symbol || searchData.query);
+      } else if (searchData.type === 'restaurants') {
+        result = await searchAPI.restaurants(
+          searchData.location || 'New York',
+          searchData.cuisine,
+          searchData.query
+        );
+      } else if (searchData.engine === 'exa') {
+        result = await searchAPI.exa(searchData.query, searchData.type);
+      } else {
+        // Default to Brave search
+        result = await searchAPI.brave(searchData.query, searchData.type, searchData.location);
+      }
+
+      setSearchResults(result);
     } catch (error) {
       console.error('Search error:', error);
       setSearchResults({
