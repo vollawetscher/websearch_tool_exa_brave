@@ -1,0 +1,43 @@
+{
+  "type": "webhook",
+  "name": "restaurant_search",
+  "description": "Find restaurants and dining options in specific locations. Automatically filters out listing sites like Yelp/TripAdvisor to find actual restaurant information. Handles natural language queries like 'Italian food near me' or 'best sushi in Seattle'.",
+  "api_schema": {
+    "url": "http://localhost:3000/api/search/restaurants",
+    "method": "POST",
+    "path_params_schema": [],
+    "query_params_schema": [],
+    "request_body_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The restaurant search query from the user (e.g., 'Italian restaurants', 'best pizza places')"
+        },
+        "location": {
+          "type": "string",
+          "description": "The location to search in (e.g., 'New York', 'downtown Seattle', 'Chicago'). If not provided, system will try to extract from query"
+        },
+        "cuisine": {
+          "type": "string",
+          "description": "Optional cuisine type to filter by (e.g., 'Italian', 'sushi', 'Mexican')"
+        }
+      },
+      "required": ["query"]
+    },
+    "request_headers": [
+      {
+        "key": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "auth_connection": null
+  },
+  "response_timeout_secs": 20,
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {}
+  },
+  "assignments": [],
+  "disable_interruptions": false,
+  "force_pre_tool_speech": "auto"
+}

@@ -1,0 +1,35 @@
+{
+  "type": "webhook",
+  "name": "crypto_search",
+  "description": "Get current cryptocurrency prices, market data, and related information. Searches for real-time crypto market information including price, market cap, and recent news.",
+  "api_schema": {
+    "url": "http://localhost:3000/api/search/crypto",
+    "method": "POST",
+    "path_params_schema": [],
+    "query_params_schema": [],
+    "request_body_schema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "The cryptocurrency symbol or name (e.g., 'BTC', 'Bitcoin', 'ETH', 'Ethereum')"
+        }
+      },
+      "required": ["symbol"]
+    },
+    "request_headers": [
+      {
+        "key": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "auth_connection": null
+  },
+  "response_timeout_secs": 20,
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {}
+  },
+  "assignments": [],
+  "disable_interruptions": false,
+  "force_pre_tool_speech": "auto"
+}

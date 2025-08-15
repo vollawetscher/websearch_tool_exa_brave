@@ -1,0 +1,59 @@
+{
+  "type": "webhook",
+  "name": "ai_search_exa",
+  "description": "Perform advanced AI-powered semantic search using Exa.ai. Best for complex queries, research topics, and finding high-quality content. Uses neural search to understand context and intent better than traditional keyword search.",
+  "api_schema": {
+    "url": "http://localhost:3000/api/search/exa",
+    "method": "POST",
+    "path_params_schema": [],
+    "query_params_schema": [],
+    "request_body_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The search query from the user. Can be complex, conversational, or research-oriented"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["neural", "keyword"],
+          "default": "neural",
+          "description": "Search type: 'neural' for AI-powered semantic search, 'keyword' for traditional keyword matching"
+        },
+        "location": {
+          "type": "string",
+          "description": "Optional location context to enhance search results"
+        },
+        "numResults": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Number of results to return"
+        },
+        "includeDomains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional array of domains to focus the search on (e.g., ['reddit.com', 'stackoverflow.com'])"
+        }
+      },
+      "required": ["query"]
+    },
+    "request_headers": [
+      {
+        "key": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "auth_connection": null
+  },
+  "response_timeout_secs": 20,
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {}
+  },
+  "assignments": [],
+  "disable_interruptions": false,
+  "force_pre_tool_speech": "auto"
+}

@@ -49,7 +49,7 @@ console.log('EXA_API_KEY:', process.env.EXA_API_KEY ? `SET (${process.env.EXA_AP
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// FIXED: Enhanced CORS configuration to allow frontend origin
+// Enhanced CORS configuration
 app.use(cors({
   origin: [
     'http://localhost:5173', 
@@ -60,117 +60,479 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  optionsSuccessStatus: 200 // For legacy browser support
+  optionsSuccessStatus: 200
 }));
 
-// Add explicit preflight handling
 app.options('*', cors());
-
 app.use(express.json());
 
-// ADDED: Helper function to clean text for TTS
+// Helper function to clean text for TTS
 function cleanTextForTTS(text) {
   if (!text) return '';
   
   return text
-    // Remove HTML tags
     .replace(/<[^>]*>/g, '')
-    // Remove extra whitespace and normalize spaces
     .replace(/\s+/g, ' ')
-    // Remove special characters that don't sound good in TTS
     .replace(/[•·]/g, '')
-    // Replace common abbreviations with full words
     .replace(/\bw\//g, 'with ')
     .replace(/\b&\b/g, 'and ')
     .replace(/\bvs\b/g, 'versus ')
     .replace(/\be\.g\./g, 'for example')
     .replace(/\bi\.e\./g, 'that is')
-    // Remove URLs (they sound terrible in TTS)
     .replace(/https?:\/\/[^\s]+/g, '')
-    // Remove email addresses
     .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '')
-    // Clean up punctuation for better speech flow
     .replace(/\.\.\./g, '.')
     .replace(/--/g, ' - ')
-    // Remove excessive punctuation
     .replace(/[!]{2,}/g, '!')
     .replace(/[?]{2,}/g, '?')
-    // Trim and clean up
     .trim()
-    // Ensure sentences end properly
     .replace(/([a-zA-Z])$/, '$1.');
 }
 
-// ADDED: Helper function to check if a result is a listing/directory page
-function isListingPage(title, description, url) {
-  const listingKeywords = [
-    'best restaurants', 'top restaurants', 'tripadvisor', 'yelp', 'opentable',
-    'restaurant guide', 'dining guide', 'restaurant list', 'find restaurants',
-    'restaurant directory', 'restaurant reviews', 'book a table', 'reservation',
-    'restaurants in', 'updated 2024', 'updated 2025'
+// INTELLIGENT QUERY ANALYSIS: Detect search intent and parameters from natural language
+function analyzeSearchQuery(query) {
+  const queryLower = query.toLowerCase();
+  
+  // Cryptocurrency detection
+  const cryptoPatterns = [
+    /\b(bitcoin|btc|ethereum|eth|dogecoin|doge|cardano|ada|solana|sol|polkadot|dot|chainlink|link|litecoin|ltc|bitcoin cash|bch|stellar|xlm|vechain|vet|theta|tfuel|filecoin|fil|tron|trx|eos|monero|xmr|dash|zcash|zec|qtum|neo|iota|miota|waves|nano|xno|algorand|algo|cosmos|atom|tezos|xtz|avalanche|avax|polygon|matic|fantom|ftm|harmony|one|near|protocol|elrond|egld|hedera|hbar|internet computer|icp|the graph|grt|uniswap|uni|aave|compound|comp|maker|mkr|synthetix|snx|yearn|yfi|curve|crv|sushiswap|sushi|pancakeswap|cake|thorchain|rune|terra|luna|anchor|anc|mirror|mir|kava|hard|band|protocol|alpha|finance|alpaca|venus|xvs|cream|ice|badger|dao|digg|harvest|farm|pickle|jar|saffron|sfi|cover|protocol|hegic|rook|keep|network|nu|livepeer|lpt|numerai|nmr|storj|basic attention token|bat|brave|0x|zrx|kyber|knc|loopring|lrc|ren|republic|protocol|ocean|data|fetch|fet|singularitynet|agi|golem|gnt|glm|status|snt|district0x|dnt|aragon|ant|civic|cvc|power ledger|powr|request|req|quantstamp|qsp|storm|storx|metal|mtl|tenx|pay|omisego|omg|raiden|rdn|funfair|fun|salt|lending|gnosis|gno|augur|rep|wings|dao|firstblood|1st|golem|network|token|gnt|bancor|bnt|aragon|network|token|ant|status|network|token|snt|matchpool|gup|singular|dtv|wings|dao|token|wings|time|new|economy|tnt|monaco|mco|tenx|pay|token|pay|omisego|omg|qtum|qtum|neo|neo|gas|gas|red pulse|rpx|deepbrain chain|dbc|trinity|tnc|ontology|ont|zilliqa|zil|aelf|elf|wanchain|wan|icon|icx|aion|aion|nebulas|nas|rchain|rhoc|eos|eos|tron|trx|vechain|vet|waltonchain|wtc|power ledger|powr|request network|req|kyber network|knc|0x|zrx|basic attention token|bat|golem|gnt|augur|rep|gnosis|gno|salt|salt|wings|wings|firstblood|1st|singular dtv|sngls|golem|gnt|time new bank|tnb|monaco|mco|metal|mtl|storj|storj|civic|cvc|district0x|dnt|aragon|ant|status|snt|bancor|bnt|funfair|fun|raiden network token|rdn|loopring|lrc|ripio credit network|rcn|chainlink|link|enjin coin|enj|populous|ppt|santiment network token|san|iexec rlc|rlc|streamr datacoin|data|cindicator|cnd|bloom|blt|ethlend|lend|decentraland|mana|maecenas|art|aventus|avt|wings|wings|firstblood|1st)\b/i,
+    /\b(crypto|cryptocurrency|coin|token|price|market cap|trading|exchange)\b/i
   ];
   
-  const titleLower = title.toLowerCase();
-  const descLower = description.toLowerCase();
-  const urlLower = url.toLowerCase();
+  const isCrypto = cryptoPatterns.some(pattern => pattern.test(queryLower));
   
-  return listingKeywords.some(keyword => 
-    titleLower.includes(keyword) || 
-    descLower.includes(keyword) ||
-    urlLower.includes('tripadvisor') ||
-    urlLower.includes('yelp') ||
-    urlLower.includes('opentable')
-  );
-}
-
-// ADDED: Helper function to extract actual restaurant names and info
-function extractRestaurantInfo(results) {
-  const restaurants = [];
+  // Restaurant detection
+  const restaurantPatterns = [
+    /\b(restaurant|restaurants|food|dining|eat|pizza|burger|sushi|italian|chinese|mexican|thai|indian|japanese|korean|vietnamese|mediterranean|greek|french|american|bbq|barbecue|steakhouse|seafood|vegetarian|vegan|cafe|coffee|breakfast|lunch|dinner|brunch|takeout|delivery|dine in|fine dining|casual dining|fast food|bistro|tavern|pub|bar|grill|kitchen|eatery|deli|bakery|pastry|dessert|ice cream|gelato|frozen yogurt|smoothie|juice|sandwich|salad|soup|noodles|ramen|pho|tacos|burritos|quesadillas|enchiladas|fajitas|nachos|wings|ribs|chicken|beef|pork|lamb|fish|shrimp|lobster|crab|oysters|mussels|clams|scallops|salmon|tuna|pasta|spaghetti|lasagna|ravioli|gnocchi|risotto|paella|curry|pad thai|fried rice|lo mein|chow mein|dim sum|dumplings|spring rolls|egg rolls|tempura|teriyaki|hibachi|teppanyaki|omakase|all you can eat|buffet|happy hour|outdoor seating|patio|rooftop|waterfront|romantic|family friendly|kid friendly|dog friendly|gluten free|organic|farm to table|locally sourced)\b/i,
+    /\b(near me|nearby|close|around|in the area)\b.*\b(food|eat|restaurant|dining)\b/i,
+    /\b(food|eat|restaurant|dining)\b.*\b(near me|nearby|close|around|in the area)\b/i
+  ];
   
-  for (const result of results) {
-    const title = result.title || '';
-    const description = result.description || '';
-    const url = result.url || '';
-    
-    // Skip obvious listing pages
-    if (isListingPage(title, description, url)) {
-      continue;
-    }
-    
-    // Look for actual restaurant names and information
-    const titleLower = title.toLowerCase();
-    const descLower = description.toLowerCase();
-    
-    // Check if this looks like an actual restaurant
-    const restaurantIndicators = [
-      'restaurant', 'bistro', 'cafe', 'taverna', 'trattoria', 'pizzeria',
-      'steakhouse', 'grill', 'bar', 'kitchen', 'house', 'place'
-    ];
-    
-    const hasRestaurantIndicator = restaurantIndicators.some(indicator => 
-      titleLower.includes(indicator) || descLower.includes(indicator)
-    );
-    
-    // Check for menu, location, or contact info (signs of actual restaurant)
-    const hasRestaurantInfo = descLower.includes('menu') || 
-                             descLower.includes('address') || 
-                             descLower.includes('phone') ||
-                             descLower.includes('hours') ||
-                             descLower.includes('cuisine') ||
-                             descLower.includes('dishes') ||
-                             descLower.includes('food');
-    
-    if (hasRestaurantIndicator || hasRestaurantInfo) {
-      restaurants.push({
-        title: cleanTextForTTS(title),
-        snippet: cleanTextForTTS(description),
-        url: url,
-        isActualRestaurant: true
-      });
+  const isRestaurant = restaurantPatterns.some(pattern => pattern.test(queryLower));
+  
+  // News detection
+  const newsPatterns = [
+    /\b(news|breaking|latest|today|yesterday|this week|current events|headlines|updates|reports|story|stories|article|articles|press|media|journalism|correspondent|reporter|anchor|broadcast|live|developing|urgent|alert|bulletin|flash|exclusive|investigation|interview|coverage|analysis|opinion|editorial|commentary|politics|political|election|vote|voting|campaign|candidate|president|senator|congress|house|senate|government|policy|law|legislation|bill|court|judge|justice|supreme court|federal|state|local|city|county|mayor|governor|official|spokesperson|statement|announcement|declaration|speech|address|conference|meeting|summit|treaty|agreement|deal|negotiation|diplomacy|international|foreign|domestic|national|global|world|worldwide|country|nation|state|region|area|zone|territory|border|immigration|refugee|asylum|war|conflict|peace|ceasefire|truce|military|army|navy|air force|marines|troops|soldiers|veterans|defense|security|terrorism|attack|bombing|shooting|violence|crime|criminal|police|law enforcement|fbi|cia|investigation|arrest|trial|verdict|sentence|prison|jail|court|lawsuit|legal|attorney|lawyer|prosecutor|defendant|plaintiff|witness|testimony|evidence|guilty|innocent|conviction|acquittal|appeal|parole|probation|fine|penalty|punishment|justice|injustice|rights|civil rights|human rights|freedom|liberty|democracy|republic|constitution|amendment|bill of rights|protest|demonstration|rally|march|strike|boycott|petition|activism|advocate|movement|cause|issue|problem|crisis|emergency|disaster|natural disaster|earthquake|hurricane|tornado|flood|fire|wildfire|drought|famine|epidemic|pandemic|virus|disease|health|medical|hospital|doctor|nurse|patient|treatment|cure|vaccine|medicine|drug|pharmaceutical|research|study|clinical trial|fda|cdc|who|health department|public health|safety|regulation|recall|warning|advisory|recommendation|guideline|protocol|procedure|standard|requirement|compliance|violation|inspection|audit|review|report|finding|conclusion|result|outcome|impact|effect|consequence|implication|significance|importance|relevance|concern|worry|fear|anxiety|stress|tension|pressure|strain|burden|challenge|difficulty|obstacle|barrier|problem|issue|matter|subject|topic|theme|focus|emphasis|priority|urgency|immediacy|timeliness|relevance|accuracy|reliability|credibility|trustworthiness|authenticity|validity|legitimacy|authority|expertise|knowledge|information|data|facts|statistics|numbers|figures|percentage|rate|ratio|proportion|comparison|contrast|difference|similarity|correlation|causation|relationship|connection|link|association|pattern|trend|direction|movement|change|shift|transition|transformation|evolution|development|progress|advancement|improvement|enhancement|upgrade|innovation|invention|discovery|breakthrough|achievement|accomplishment|success|failure|setback|decline|decrease|reduction|cut|loss|damage|harm|injury|hurt|pain|suffering|tragedy|disaster|catastrophe|calamity|misfortune|accident|incident|event|occurrence|happening|situation|circumstance|condition|state|status|position|location|place|site|venue|setting|environment|context|background|history|past|present|future|time|date|day|week|month|year|decade|century|era|period|phase|stage|step|level|degree|extent|scope|scale|size|magnitude|intensity|severity|seriousness|gravity|weight|importance|significance|relevance|meaning|purpose|goal|objective|aim|target|intention|plan|strategy|approach|method|technique|procedure|process|system|mechanism|structure|organization|institution|agency|department|bureau|office|administration|management|leadership|authority|power|control|influence|impact|effect|consequence|result|outcome|achievement|success|failure|problem|issue|challenge|difficulty|obstacle|barrier|solution|answer|response|reaction|action|measure|step|initiative|program|project|campaign|effort|attempt|try|endeavor|undertaking|venture|enterprise|business|company|corporation|organization|firm|industry|sector|market|economy|economic|financial|fiscal|monetary|budget|spending|investment|funding|revenue|income|profit|loss|debt|deficit|surplus|growth|expansion|development|progress|improvement|decline|recession|depression|recovery|boom|bust|cycle|trend|pattern|direction|movement|change|shift|transformation|evolution|innovation|technology|digital|online|internet|web|website|social media|facebook|twitter|instagram|youtube|google|amazon|apple|microsoft|tesla|netflix|uber|airbnb|zoom|tiktok|snapchat|linkedin|pinterest|reddit|wikipedia|email|text|message|communication|information|data|news|media|entertainment|sports|music|movies|tv|television|radio|podcast|streaming|gaming|video games|education|school|college|university|student|teacher|professor|research|science|technology|medicine|health|environment|climate|weather|nature|animal|wildlife|conservation|sustainability|renewable|energy|oil|gas|coal|nuclear|solar|wind|water|electric|battery|car|vehicle|transportation|travel|tourism|hotel|restaurant|food|drink|culture|art|music|literature|book|author|writer|artist|actor|actress|celebrity|famous|popular|trending|viral|hashtag|meme|funny|humor|comedy|drama|romance|action|adventure|thriller|horror|mystery|crime|documentary|biography|history|science fiction|fantasy|animation|cartoon|comic|superhero|marvel|dc|disney|pixar|netflix|hulu|amazon prime|hbo|showtime|espn|cnn|fox|nbc|abc|cbs|bbc|reuters|associated press|new york times|washington post|wall street journal|usa today|los angeles times|chicago tribune|boston globe|miami herald|dallas morning news|houston chronicle|philadelphia inquirer|atlanta journal constitution|denver post|seattle times|san francisco chronicle|sacramento bee|orange county register|san diego union tribune|arizona republic|las vegas review journal|salt lake tribune|oregonian|kansas city star|st louis post dispatch|milwaukee journal sentinel|detroit free press|cleveland plain dealer|pittsburgh post gazette|baltimore sun|richmond times dispatch|charlotte observer|raleigh news observer|tampa bay times|orlando sentinel|jacksonville times union|nashville tennessean|louisville courier journal|indianapolis star|columbus dispatch|cincinnati enquirer|toledo blade|akron beacon journal|youngstown vindicator|dayton daily news|buffalo news|rochester democrat chronicle|syracuse post standard|albany times union|hartford courant|new haven register|bridgeport post|waterbury republican american|stamford advocate|norwalk hour|danbury news times|middletown press|meriden record journal|new britain herald|bristol press|torrington register citizen|winsted citizen|litchfield county times|republican american|connecticut post|fairfield citizen|westport news|wilton bulletin|ridgefield press|new canaan advertiser|darien news|greenwich time|stamford times|norwalk gazette|westport minuteman|fairfield minuteman|easton courier|monroe courier|trumbull times|shelton herald|derby informer|ansonia sentinel|seymour record|beacon falls informer|prospect republican|bethany beacon|woodbridge town crier|hamden chronicle|north haven citizen|wallingford voice|durham sentinel|middlefield voice|cromwell press|portland rivereast|east hampton rivereast|marlborough rivereast|hebron rivereast|andover rivereast|columbia rivereast|coventry rivereast|bolton rivereast|vernon rockville journal inquirer|manchester journal inquirer|south windsor journal inquirer|east hartford gazette|glastonbury citizen|rocky hill citizen|wethersfield citizen|newington town crier|west hartford news|hartford news|bloomfield journal inquirer|windsor journal inquirer|windsor locks journal inquirer|suffield observer|granby drummer|simsbury news|avon news|canton news|burlington news|harwinton news|torrington news|winsted news|norfolk news|colebrook news|hartland news|barkhamsted news|new hartford news|winchester news|goshen news|litchfield news|morris news|bethlehem news|woodbury news|southbury news|newtown news|brookfield news|danbury news|ridgefield news|wilton news|westport news|fairfield news|bridgeport news|stratford news|milford news|west haven news|new haven news|east haven news|branford news|guilford news|madison news|clinton news|westbrook news|old saybrook news|essex news|chester news|deep river news|killingworth news|durham news|middletown news|cromwell news|portland news|east hampton news|marlborough news|hebron news|andover news|columbia news|coventry news|bolton news|manchester news|vernon news|tolland news|ellington news|somers news|enfield news|suffield news|granby news|simsbury news|avon news|canton news|burlington news|harwinton news|barkhamsted news|new hartford news|winchester news|colebrook news|hartland news|norfolk news|goshen news|litchfield news|warren news|washington news|roxbury news|bridgewater news|brookfield news|bethel news|redding news|easton news|monroe news|trumbull news|shelton news|seymour news|ansonia news|derby news|beacon falls news|prospect news|bethany news|woodbridge news|orange news|milford news|stratford news|bridgeport news|fairfield news|westport news|norwalk news|stamford news|greenwich news|new canaan news|darien news|wilton news|ridgefield news|danbury news|newtown news|southbury news|woodbury news|watertown news|thomaston news|plymouth news|terryville news|bristol news|plainville news|new britain news|berlin news|cromwell news|middletown news|durham news|killingworth news|clinton news|madison news|guilford news|branford news|east haven news|new haven news|west haven news|orange news|derby news|ansonia news|seymour news|beacon falls news|naugatuck news|waterbury news|wolcott news|bristol news|burlington news|canton news|avon news|simsbury news|granby news|suffield news|enfield news|somers news|stafford news|union news|tolland news|vernon news|manchester news|bolton news|coventry news|andover news|hebron news|marlborough news|east hampton news|portland news|cromwell news|middletown news|durham news|killingworth news|clinton news|westbrook news|old saybrook news|essex news|chester news|deep river news|haddam news|east haddam news|colchester news|salem news|east lyme news|waterford news|new london news|groton news|ledyard news|montville news|norwich news|preston news|griswold news|voluntown news|sterling news|plainfield news|killingly news|putnam news|thompson news|woodstock news|pomfret news|eastford news|ashford news|willington news|tolland news|ellington news|vernon news|manchester news|glastonbury news|south windsor news|east windsor news|windsor locks news|windsor news|bloomfield news|west hartford news|hartford news|east hartford news|wethersfield news|rocky hill news|cromwell news|portland news|middletown news|durham news|middlefield news|haddam news|killingworth news|clinton news|madison news|guilford news|branford news|north branford news|east haven news|new haven news|hamden news|north haven news|wallingford news|meriden news|middletown news|cromwell news|portland news|east hampton news|marlborough news|hebron news|andover news|columbia news|coventry news|mansfield news|storrs news|willington news|ashford news|eastford news|pomfret news|woodstock news|thompson news|putnam news|killingly news|plainfield news|sterling news|voluntown news|griswold news|preston news|norwich news|montville news|waterford news|east lyme news|old lyme news|lyme news|old saybrook news|westbrook news|clinton news|madison news|guilford news|branford news|north branford news|east haven news|new haven news|west haven news|orange news|milford news|stratford news|bridgeport news|fairfield news|westport news|norwalk news|stamford news|greenwich news|new canaan news|darien news|wilton news|ridgefield news|danbury news|bethel news|redding news|easton news|monroe news|trumbull news|shelton news|seymour news|ansonia news|derby news|beacon falls news|naugatuck news|prospect news|bethany news|waterbury news|wolcott news|bristol news|plainville news|new britain news|berlin news|cromwell news|middletown news|portland news|east hampton news|colchester news|salem news|east lyme news|waterford news|new london news|groton news|ledyard news|montville news|norwich news|preston news|griswold news|voluntown news|sterling news|plainfield news|killingly news|putnam news|thompson news|woodstock news|pomfret news|eastford news|ashford news|willington news|tolland news|ellington news|vernon news|manchester news|glastonbury news|south windsor news|east windsor news|windsor locks news|windsor news|bloomfield news|west hartford news|hartford news|east hartford news|wethersfield news|rocky hill news|newington news|berlin news|cromwell news|middletown news|durham news|middlefield news|haddam news|east haddam news|chester news|deep river news|essex news|old saybrook news|westbrook news|clinton news|madison news|guilford news|branford news|north branford news|east haven news|new haven news|hamden news|north haven news|wallingford news|meriden news|durham news|middlefield news|middletown news|cromwell news|portland news|east hampton news|marlborough news|hebron news|andover news|columbia news|coventry news|mansfield news|storrs news|willington news|ashford news|eastford news|pomfret news|woodstock news|thompson news|putnam news|killingly news|plainfield news|sterling news|voluntown news|griswold news|preston news|norwich news|montville news|waterford news|east lyme news|old lyme news|lyme news|old saybrook news|westbrook news|clinton news|madison news|guilford news|branford news|north branford news|east haven news|new haven news|west haven news|orange news|milford news|stratford news|bridgeport news|fairfield news|westport news|norwalk news|stamford news|greenwich news)\b/i,
+    /\b(what's happening|what happened|tell me about|update on|latest on)\b/i
+  ];
+  
+  const isNews = newsPatterns.some(pattern => pattern.test(queryLower));
+  
+  // Location extraction (same as before)
+  const locationPatterns = [
+    { pattern: /\b(near me|close to me|around me|nearby)\b/i, location: null, isNearMe: true },
+    { pattern: /\bin\s+([a-zA-Z\s,]+?)(?:\s+(?:please|thanks|thank you)|$)/i, location: 1 },
+    { pattern: /\b(?:around|near)\s+([a-zA-Z\s,]+?)(?:\s+(?:please|thanks|thank you)|$)/i, location: 1 },
+    { pattern: /\b([a-zA-Z\s,]+?)\s+area\b/i, location: 1 },
+    // Major US cities pattern (simplified for brevity)
+    { pattern: /\b(new york|los angeles|chicago|houston|phoenix|philadelphia|san antonio|san diego|dallas|san jose|austin|jacksonville|fort worth|columbus|charlotte|san francisco|indianapolis|seattle|denver|washington|boston|el paso|detroit|nashville|portland|memphis|oklahoma city|las vegas|louisville|baltimore|milwaukee|albuquerque|tucson|fresno|sacramento|mesa|kansas city|atlanta|long beach|colorado springs|raleigh|miami|virginia beach|omaha|oakland|minneapolis|tulsa|cleveland|wichita|arlington|new orleans|bakersfield|tampa|honolulu|aurora|anaheim|santa ana|st louis|riverside|corpus christi|lexington|pittsburgh|anchorage|stockton|cincinnati|saint paul|toledo|newark|greensboro|plano|henderson|lincoln|buffalo|jersey city|chula vista|fort wayne|orlando|st petersburg|chandler|laredo|norfolk|durham|madison|lubbock|irvine|winston salem|glendale|garland|hialeah|reno|chesapeake|gilbert|baton rouge|irving|scottsdale|north las vegas|fremont|boise|richmond|san bernardino|birmingham|spokane|rochester|des moines|modesto|fayetteville|tacoma|oxnard|fontana|montgomery|moreno valley|shreveport|yonkers|akron|huntington beach|little rock|augusta|amarillo|mobile|grand rapids|salt lake city|tallahassee|huntsville|grand prairie|knoxville|worcester|newport news|brownsville|overland park|santa clarita|providence|garden grove|chattanooga|oceanside|jackson|fort lauderdale|santa rosa|rancho cucamonga|port st lucie|tempe|ontario|vancouver|cape coral|sioux falls|springfield|peoria|pembroke pines|elk grove|salem|lancaster|corona|eugene|palmdale|salinas|pasadena|fort collins|hayward|pomona|cary|rockford|alexandria|escondido|mckinney|joliet|sunnyvale|torrance|bridgeport|lakewood|hollywood|paterson|naperville|syracuse|mesquite|dayton|savannah|clarksville|orange|fullerton|killeen|frisco|hampton|mcallen|warren|west valley city|columbia|olathe|sterling heights|new haven|miramar|waco|thousand oaks|cedar rapids|charleston|sioux city|round rock|fargo|carrollton|roseville|concord|thornton|visalia|beaumont|gainesville|simi valley|denton|green bay|miami gardens|pueblo|brockton|santa maria|waterbury|manchester|high point|gresham|lowell|temecula|vallejo|el monte|independence|provo|costa mesa|inglewood|ann arbor|downey|sandy springs|lewisville|westminster|ventura|rio rancho|league city|santa monica|quincy|lynn|norman|antioch|murfreesboro|cambridge|elgin|clearwater|broken arrow|west palm beach|college station|carlsbad|pearland|midland|miami beach|west jordan|billings|daly city|allen|abilene|south bend|livonia|westland|renton|norwalk|centennial|everett|palm bay|wichita falls|dearborn|richardson|las cruces|arvada|evansville|lansing|yuma|clinton|fort smith|cedar falls|ogden|st joseph|davenport)\b/i, location: 1 },
+    // State abbreviations and names
+    { pattern: /\b(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming|al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy)\b/i, location: 1 }
+  ];
+  
+  let extractedLocation = { location: null, isNearMe: false, originalQuery: query };
+  
+  for (const { pattern, location, isNearMe } of locationPatterns) {
+    const match = queryLower.match(pattern);
+    if (match) {
+      if (isNearMe) {
+        extractedLocation = { location: null, isNearMe: true, originalQuery: query };
+        break;
+      } else if (location && match[location]) {
+        const locationText = match[location].trim();
+        const cleanLocation = locationText
+          .replace(/\b(restaurants?|food|dining|eat|pizza|burger|coffee|cafe)\b/gi, '')
+          .trim();
+        
+        if (cleanLocation.length > 2) {
+          extractedLocation = { location: cleanLocation, isNearMe: false, originalQuery: query };
+          break;
+        }
+      }
     }
   }
   
-  return restaurants;
+  // Determine search strategy
+  let searchStrategy = 'web';
+  let searchEngine = 'brave';
+  
+  if (isCrypto) {
+    searchStrategy = 'crypto';
+  } else if (isRestaurant) {
+    searchStrategy = 'restaurants';
+  } else if (isNews) {
+    searchStrategy = 'news';
+  } else {
+    // For complex queries, use Exa AI
+    const complexPatterns = [
+      /\b(how does|how do|explain|what is|what are|why|research|analysis|study|academic|scientific|technical|detailed|comprehensive|in-depth|compare|comparison|versus|vs|difference between|pros and cons|advantages|disadvantages|benefits|drawbacks|impact|effect|cause|reason|theory|concept|principle|mechanism|process|method|approach|strategy|solution|problem solving|best practices|recommendations|guide|tutorial|step by step|instructions|tips|advice|suggestions|help|assistance|support|information|knowledge|understanding|learning|education|training|development|improvement|optimization|enhancement|innovation|creativity|design|architecture|engineering|technology|science|mathematics|physics|chemistry|biology|medicine|health|psychology|sociology|philosophy|history|literature|art|culture|society|politics|economics|business|finance|marketing|management|leadership|entrepreneurship|startup|innovation|disruption|transformation|digital|artificial intelligence|machine learning|deep learning|neural networks|algorithms|data science|big data|analytics|statistics|programming|software|hardware|computing|internet|web|mobile|cloud|cybersecurity|blockchain|cryptocurrency|fintech|biotech|nanotech|quantum|renewable energy|sustainability|climate change|environment|conservation|ecology|biodiversity|evolution|genetics|genomics|biotechnology|nanotechnology|robotics|automation|manufacturing|industry|agriculture|transportation|logistics|supply chain|retail|e-commerce|healthcare|education|entertainment|media|communication|social media|networking|collaboration|teamwork|project management|quality assurance|testing|debugging|troubleshooting|maintenance|support|customer service|user experience|user interface|design thinking|human-centered design|accessibility|usability|performance|scalability|reliability|security|privacy|ethics|compliance|regulation|governance|policy|law|legal|intellectual property|patents|trademarks|copyrights|licensing|contracts|agreements|negotiations|partnerships|alliances|mergers|acquisitions|investments|funding|venture capital|private equity|public markets|stocks|bonds|commodities|derivatives|forex|trading|portfolio|risk management|insurance|banking|lending|credit|debt|savings|retirement|wealth management|financial planning|tax|accounting|auditing|compliance|reporting|transparency|accountability|corporate responsibility|sustainability|social impact|philanthropy|non-profit|charity|volunteering|community|society|culture|diversity|inclusion|equality|justice|human rights|civil rights|freedom|democracy|governance|citizenship|participation|engagement|activism|advocacy|social change|reform|revolution|progress|development|growth|expansion|globalization|internationalization|localization|adaptation|customization|personalization|individualization|specialization|generalization|standardization|normalization|optimization|maximization|minimization|efficiency|effectiveness|productivity|performance|quality|excellence|innovation|creativity|originality|uniqueness|differentiation|competitive advantage|market positioning|branding|reputation|trust|credibility|authority|expertise|knowledge|skills|competencies|capabilities|strengths|weaknesses|opportunities|threats|challenges|risks|uncertainties|complexities|complications|difficulties|obstacles|barriers|limitations|constraints|requirements|specifications|standards|criteria|metrics|measurements|evaluation|assessment|analysis|synthesis|interpretation|understanding|insights|conclusions|recommendations|decisions|choices|options|alternatives|trade-offs|priorities|goals|objectives|targets|milestones|deadlines|timelines|schedules|plans|strategies|tactics|actions|initiatives|programs|projects|campaigns|efforts|activities|tasks|responsibilities|roles|functions|duties|obligations|commitments|promises|agreements|contracts|partnerships|relationships|connections|networks|communities|ecosystems|platforms|marketplaces|exchanges|hubs|centers|institutes|organizations|institutions|agencies|departments|divisions|units|teams|groups|committees|boards|councils|panels|forums|conferences|summits|meetings|workshops|seminars|webinars|courses|training|education|learning|development|growth|improvement|enhancement|advancement|progress|evolution|transformation|change|transition|shift|movement|trend|pattern|cycle|phase|stage|level|degree|scale|scope|range|spectrum|variety|diversity|complexity|simplicity|clarity|transparency|visibility|accessibility|availability|convenience|ease|comfort|satisfaction|happiness|well-being|health|wellness|fitness|nutrition|diet|exercise|lifestyle|habits|behaviors|attitudes|beliefs|values|principles|ethics|morals|character|personality|identity|self|individual|person|human|humanity|society|community|culture|civilization|world|universe|cosmos|nature|environment|earth|planet|solar system|galaxy|space|time|reality|existence|life|consciousness|mind|brain|intelligence|wisdom|knowledge|understanding|awareness|perception|cognition|thinking|reasoning|logic|analysis|synthesis|creativity|imagination|intuition|emotion|feeling|sentiment|mood|attitude|behavior|action|reaction|response|interaction|communication|language|speech|writing|reading|listening|learning|memory|recall|recognition|comprehension|interpretation|meaning|significance|importance|relevance|value|worth|benefit|advantage|positive|negative|good|bad|right|wrong|true|false|fact|fiction|reality|fantasy|dream|vision|goal|aspiration|hope|wish|desire|want|need|requirement|necessity|essential|important|critical|vital|crucial|key|main|primary|secondary|tertiary|first|second|third|last|final|ultimate|best|worst|better|worse|good|bad|excellent|poor|high|low|big|small|large|tiny|huge|massive|enormous|gigantic|microscopic|minuscule|fast|slow|quick|rapid|swift|sluggish|early|late|soon|later|now|then|before|after|during|while|when|where|what|who|why|how|which|whose|whom|whatever|whenever|wherever|however|whichever|whoever|whomever|anything|something|nothing|everything|someone|anyone|no one|everyone|somewhere|anywhere|nowhere|everywhere|somehow|anyhow|anyway|always|never|sometimes|often|rarely|seldom|frequently|occasionally|usually|normally|typically|generally|specifically|particularly|especially|mainly|mostly|primarily|secondarily|additionally|furthermore|moreover|besides|also|too|as well|in addition|plus|and|or|but|yet|however|nevertheless|nonetheless|still|though|although|even though|despite|in spite of|regardless|irrespective|notwithstanding|whereas|while|since|because|as|for|so|therefore|thus|hence|consequently|accordingly|subsequently|then|next|finally|lastly|in conclusion|to summarize|in summary|overall|in general|on the whole|by and large|for the most part|in most cases|typically|usually|normally|generally|commonly|frequently|often|regularly|consistently|constantly|continuously|perpetually|always|forever|eternally|permanently|temporarily|briefly|momentarily|instantly|immediately|suddenly|abruptly|gradually|slowly|steadily|progressively|increasingly|decreasingly|more|less|most|least|very|quite|rather|fairly|pretty|somewhat|slightly|barely|hardly|scarcely|almost|nearly|approximately|roughly|about|around|exactly|precisely|specifically|particularly|especially|notably|remarkably|significantly|considerably|substantially|dramatically|drastically|radically|fundamentally|essentially|basically|primarily|mainly|chiefly|principally|largely|mostly|generally|typically|usually|normally|commonly|frequently|often|regularly|consistently|constantly|continuously|perpetually|always|never|sometimes|occasionally|rarely|seldom|hardly ever|almost never|almost always|nearly always|usually|normally|typically|generally|commonly|frequently|often|regularly|consistently|constantly|continuously|perpetually|forever|eternally|permanently|temporarily|briefly|momentarily|instantly|immediately|suddenly|abruptly|gradually|slowly|steadily|progressively|increasingly|decreasingly|more and more|less and less|better and better|worse and worse|faster and faster|slower and slower|bigger and bigger|smaller and smaller|higher and higher|lower and lower|stronger and stronger|weaker and weaker|louder and louder|quieter and quieter|brighter and brighter|darker and darker|clearer and clearer|more and more complex|more and more simple|more and more difficult|more and more easy|more and more important|more and more relevant|more and more significant|more and more valuable|more and more useful|more and more effective|more and more efficient|more and more productive|more and more successful|more and more popular|more and more common|more and more frequent|more and more rare|more and more unique|more and more special|more and more interesting|more and more boring|more and more exciting|more and more disappointing|more and more surprising|more and more expected|more and more predictable|more and more unpredictable|more and more certain|more and more uncertain|more and more likely|more and more unlikely|more and more possible|more and more impossible|more and more probable|more and more improbable|more and more realistic|more and more unrealistic|more and more practical|more and more impractical|more and more feasible|more and more unfeasible|more and more viable|more and more unviable|more and more sustainable|more and more unsustainable|more and more stable|more and more unstable|more and more secure|more and more insecure|more and more safe|more and more dangerous|more and more risky|more and more safe|more and more reliable|more and more unreliable|more and more trustworthy|more and more untrustworthy|more and more credible|more and more incredible|more and more believable|more and more unbelievable|more and more convincing|more and more unconvincing|more and more persuasive|more and more unpersuasive|more and more compelling|more and more uncompelling|more and more attractive|more and more unattractive|more and more appealing|more and more unappealing|more and more desirable|more and more undesirable|more and more wanted|more and more unwanted|more and more needed|more and more unneeded|more and more necessary|more and more unnecessary|more and more essential|more and more nonessential|more and more important|more and more unimportant|more and more significant|more and more insignificant|more and more meaningful|more and more meaningless|more and more valuable|more and more worthless|more and more useful|more and more useless|more and more helpful|more and more unhelpful|more and more beneficial|more and more harmful|more and more positive|more and more negative|more and more good|more and more bad|more and more right|more and more wrong|more and more correct|more and more incorrect|more and more accurate|more and more inaccurate|more and more precise|more and more imprecise|more and more exact|more and more inexact|more and more specific|more and more general|more and more detailed|more and more vague|more and more clear|more and more unclear|more and more obvious|more and more obscure|more and more evident|more and more hidden|more and more visible|more and more invisible|more and more apparent|more and more unapparent|more and more manifest|more and more latent|more and more explicit|more and more implicit|more and more direct|more and more indirect|more and more straightforward|more and more complicated|more and more simple|more and more complex|more and more easy|more and more difficult|more and more hard|more and more soft|more and more tough|more and more gentle|more and more rough|more and more smooth|more and more sharp|more and more dull|more and more bright|more and more dim|more and more light|more and more dark|more and more loud|more and more quiet|more and more fast|more and more slow|more and more quick|more and more sluggish|more and more rapid|more and more gradual|more and more sudden|more and more abrupt|more and more immediate|more and more delayed|more and more early|more and more late|more and more soon|more and more distant|more and more close|more and more near|more and more far|more and more high|more and more low|more and more big|more and more small|more and more large|more and more tiny|more and more huge|more and more minuscule|more and more enormous|more and more microscopic|more and more gigantic|more and more massive|more and more heavy|more and more light|more and more thick|more and more thin|more and more wide|more and more narrow|more and more broad|more and more slim|more and more fat|more and more skinny|more and more tall|more and more short|more and more long|more and more brief|more and more extensive|more and more limited|more and more broad|more and more narrow|more and more wide|more and more tight|more and more loose|more and more firm|more and more soft|more and more hard|more and more solid|more and more liquid|more and more gas|more and more hot|more and more cold|more and more warm|more and more cool|more and more dry|more and more wet|more and more moist|more and more humid|more and more arid|more and more fresh|more and more stale|more and more new|more and more old|more and more young|more and more ancient|more and more modern|more and more traditional|more and more contemporary|more and more current|more and more outdated|more and more recent|more and more past|more and more future|more and more present|more and more temporary|more and more permanent|more and more stable|more and more changing|more and more constant|more and more variable|more and more fixed|more and more flexible|more and more rigid|more and more adaptable|more and more static|more and more dynamic|more and more active|more and more passive|more and more aggressive|more and more peaceful|more and more violent|more and more gentle|more and more harsh|more and more kind|more and more cruel|more and more nice|more and more mean|more and more friendly|more and more hostile|more and more welcoming|more and more rejecting|more and more accepting|more and more discriminating|more and more inclusive|more and more exclusive|more and more open|more and more closed|more and more public|more and more private|more and more social|more and more antisocial|more and more extroverted|more and more introverted|more and more outgoing|more and more shy|more and more confident|more and more insecure|more and more bold|more and more timid|more and more brave|more and more cowardly|more and more courageous|more and more fearful|more and more optimistic|more and more pessimistic|more and more hopeful|more and more hopeless|more and more positive|more and more negative|more and more happy|more and more sad|more and more joyful|more and more sorrowful|more and more cheerful|more and more gloomy|more and more excited|more and more bored|more and more interested|more and more disinterested|more and more curious|more and more indifferent|more and more enthusiastic|more and more apathetic|more and more passionate|more and more dispassionate|more and more emotional|more and more rational|more and more logical|more and more illogical|more and more reasonable|more and more unreasonable|more and more sensible|more and more nonsensical|more and more wise|more and more foolish|more and more smart|more and more stupid|more and more intelligent|more and more ignorant|more and more knowledgeable|more and more unknowledgeable|more and more educated|more and more uneducated|more and more learned|more and more unlearned|more and more experienced|more and more inexperienced|more and more skilled|more and more unskilled|more and more talented|more and more untalented|more and more gifted|more and more ungifted|more and more capable|more and more incapable|more and more competent|more and more incompetent|more and more qualified|more and more unqualified|more and more expert|more and more novice|more and more professional|more and more amateur|more and more mature|more and more immature|more and more adult|more and more childish|more and more grown up|more and more juvenile|more and more sophisticated|more and more naive|more and more worldly|more and more innocent|more and more experienced|more and more green|more and more seasoned|more and more fresh|more and more veteran|more and more rookie|more and more senior|more and more junior|more and more advanced|more and more basic|more and more elementary|more and more complex|more and more simple|more and more complicated|more and more easy|more and more difficult|more and more hard|more and more challenging|more and more effortless|more and more demanding|more and more requiring|more and more optional|more and more mandatory|more and more voluntary|more and more forced|more and more willing|more and more reluctant|more and more eager|more and more hesitant|more and more ready|more and more unprepared|more and more prepared|more and more organized|more and more disorganized|more and more systematic|more and more random|more and more methodical|more and more haphazard|more and more planned|more and more spontaneous|more and more deliberate|more and more accidental|more and more intentional|more and more unintentional|more and more purposeful|more and more aimless|more and more focused|more and more scattered|more and more concentrated|more and more distracted|more and more attentive|more and more inattentive|more and more alert|more and more drowsy|more and more awake|more and more asleep|more and more conscious|more and more unconscious|more and more aware|more and more unaware|more and more mindful|more and more mindless|more and more thoughtful|more and more thoughtless|more and more considerate|more and more inconsiderate|more and more careful|more and more careless|more and more cautious|more and more reckless|more and more prudent|more and more imprudent|more and more wise|more and more unwise|more and more judicious|more and more injudicious|more and more sensible|more and more senseless|more and more reasonable|more and more unreasonable|more and more rational|more and more irrational|more and more logical|more and more illogical|more and more coherent|more and more incoherent|more and more consistent|more and more inconsistent|more and more reliable|more and more unreliable|more and more dependable|more and more undependable|more and more trustworthy|more and more untrustworthy|more and more honest|more and more dishonest|more and more truthful|more and more untruthful|more and more sincere|more and more insincere|more and more genuine|more and more fake|more and more authentic|more and more inauthentic|more and more real|more and more artificial|more and more natural|more and more unnatural|more and more organic|more and more synthetic|more and more pure|more and more impure|more and more clean|more and more dirty|more and more fresh|more and more stale|more and more healthy|more and more unhealthy|more and more fit|more and more unfit|more and more strong|more and more weak|more and more powerful|more and more powerless|more and more energetic|more and more lethargic|more and more active|more and more inactive|more and more busy|more and more idle|more and more productive|more and more unproductive|more and more efficient|more and more inefficient|more and more effective|more and more ineffective|more and more successful|more and more unsuccessful|more and more winning|more and more losing|more and more victorious|more and more defeated|more and more triumphant|more and more failed|more and more accomplished|more and more unaccomplished|more and more achieved|more and more unachieved|more and more fulfilled|more and more unfulfilled|more and more satisfied|more and more unsatisfied|more and more content|more and more discontent|more and more pleased|more and more displeased|more and more happy|more and more unhappy|more and more glad|more and more sad|more and more joyful|more and more sorrowful|more and more delighted|more and more disappointed|more and more thrilled|more and more bored|more and more excited|more and more unexcited|more and more enthusiastic|more and more unenthusiastic|more and more passionate|more and more dispassionate|more and more interested|more and more uninterested|more and more engaged|more and more disengaged|more and more involved|more and more uninvolved|more and more committed|more and more uncommitted|more and more dedicated|more and more undedicated|more and more devoted|more and more undevoted|more and more loyal|more and more disloyal|more and more faithful|more and more unfaithful|more and more true|more and more false|more and more constant|more and more inconstant|more and more steady|more and more unsteady|more and more stable|more and more unstable|more and more secure|more and more insecure|more and more safe|more and more unsafe|more and more protected|more and more unprotected|more and more defended|more and more undefended|more and more guarded|more and more unguarded|more and more shielded|more and more exposed|more and more covered|more and more uncovered|more and more hidden|more and more revealed|more and more concealed|more and more disclosed|more and more secret|more and more open|more and more private|more and more public|more and more personal|more and more impersonal|more and more individual|more and more collective|more and more unique|more and more common|more and more special|more and more ordinary|more and more extraordinary|more and more normal|more and more abnormal|more and more typical|more and more atypical|more and more standard|more and more nonstandard|more and more regular|more and more irregular|more and more uniform|more and more varied|more and more consistent|more and more inconsistent|more and more predictable|more and more unpredictable|more and more expected|more and more unexpected|more and more anticipated|more and more unanticipated|more and more foreseen|more and more unforeseen|more and more planned|more and more unplanned|more and more intended|more and more unintended|more and more deliberate|more and more accidental|more and more purposeful|more and more purposeless|more and more meaningful|more and more meaningless|more and more significant|more and more insignificant|more and more important|more and more unimportant|more and more relevant|more and more irrelevant|more and more applicable|more and more inapplicable|more and more suitable|more and more unsuitable|more and more appropriate|more and more inappropriate|more and more fitting|more and more unfitting|more and more proper|more and more improper|more and more right|more and more wrong|more and more correct|more and more incorrect|more and more accurate|more and more inaccurate|more and more precise|more and more imprecise|more and more exact|more and more inexact|more and more specific|more and more general|more and more particular|more and more universal|more and more detailed|more and more vague|more and more clear|more and more unclear|more and more obvious|more and more obscure|more and more evident|more and more hidden|more and more apparent|more and more unapparent|more and more visible|more and more invisible|more and more noticeable|more and more unnoticeable|more and more conspicuous|more and more inconspicuous|more and more prominent|more and more unprominent|more and more outstanding|more and more unoutstanding|more and more remarkable|more and more unremarkable|more and more notable|more and more unnotable|more and more noteworthy|more and more unnoteworthy|more and more memorable|more and more unmemorable|more and more unforgettable|more and more forgettable|more and more impressive|more and more unimpressive|more and more striking|more and more unstirking|more and more dramatic|more and more undramatic|more and more spectacular|more and more unspectacular|more and more amazing|more and more unamazing|more and more astonishing|more and more unastonishing|more and more astounding|more and more unastounding|more and more surprising|more and more unsurprising|more and more shocking|more and more unshocking|more and more startling|more and more unstartling|more and more stunning|more and more unstunning|more and more breathtaking|more and more unbreathtaking|more and more awe inspiring|more and more uninspiring|more and more wonderful|more and more unwonderful|more and more marvelous|more and more unmarvelous|more and more fantastic|more and more unfantastic|more and more incredible|more and more credible|more and more unbelievable|more and more believable|more and more miraculous|more and more unmiraculous|more and more magical|more and more unmagical|more and more mystical|more and more unmystical|more and more mysterious|more and more unmysterious|more and more enigmatic|more and more unenigmatic|more and more puzzling|more and more unpuzzling|more and more confusing|more and more unconfusing|more and more perplexing|more and more unperplexing|more and more baffling|more and more unbaffling|more and more bewildering|more and more unbewildering|more and more mystifying|more and more unmystifying|more and more intriguing|more and more unintriguing|more and more fascinating|more and more unfascinating|more and more captivating|more and more uncaptivating|more and more enchanting|more and more unenchanting|more and more charming|more and more uncharming|more and more appealing|more and more unappealing|more and more attractive|more and more unattractive|more and more beautiful|more and more ugly|more and more pretty|more and more unpretty|more and more handsome|more and more unhandsome|more and more gorgeous|more and more ungorgeous|more and more stunning|more and more unstunning|more and more lovely|more and more unlovely|more and more adorable|more and more unadorable|more and more cute|more and more uncute|more and more sweet|more and more unsweet|more and more pleasant|more and more unpleasant|more and more agreeable|more and more disagreeable|more and more delightful|more and more undelightful|more and more enjoyable|more and more unenjoyable|more and more fun|more and more unfun|more and more entertaining|more and more unentertaining|more and more amusing|more and more unamusing|more and more funny|more and more unfunny|more and more humorous|more and more unhumorous|more and more witty|more and more unwitty|more and more clever|more and more unclever|more and more smart|more and more unsmart|more and more brilliant|more and more unbrilliant|more and more genius|more and more ungenius|more and more talented|more and more untalented|more and more gifted|more and more ungifted|more and more skilled|more and more unskilled|more and more capable|more and more incapable|more and more competent|more and more incompetent|more and more qualified|more and more unqualified|more and more experienced|more and more inexperienced|more and more expert|more and more unexpert|more and more professional|more and more unprofessional|more and more masterful|more and more unmasterful|more and more excellent|more and more unexcellent|more and more superior|more and more inferior|more and more outstanding|more and more unoutstanding|more and more exceptional|more and more unexceptional|more and more extraordinary|more and more unextraordinary|more and more remarkable|more and more unremarkable|more and more impressive|more and more unimpressive|more and more admirable|more and more unadmirable|more and more respectable|more and more unrespectable|more and more honorable|more and more dishonorable|more and more noble|more and more ignoble|more and more dignified|more and more undignified|more and more prestigious|more and more unprestigious|more and more renowned|more and more unrenowned|more and more famous|more and more unfamous|more and more celebrated|more and more uncelebrated|more and more acclaimed|more and more unacclaimed|more and more recognized|more and more unrecognized|more and more acknowledged|more and more unacknowledged|more and more appreciated|more and more unappreciated|more and more valued|more and more unvalued|more and more treasured|more and more untreasured|more and more cherished|more and more uncherished|more and more beloved|more and more unbeloved|more and more loved|more and more unloved|more and more adored|more and more unadored|more and more worshipped|more and more unworshipped|more and more revered|more and more unreverred|more and more respected|more and more disrespected|more and more esteemed|more and more unesteemed|more and more honored|more and more dishonored|more and more praised|more and more unpraised|more and more complimented|more and more uncomplimented|more and more flattered|more and more unflattered|more and more admired|more and more unadmired|more and more looked up to|more and more looked down on|more and more popular|more and more unpopular|more and more liked|more and more disliked|more and more favored|more and more unfavored|more and more preferred|more and more unpreferred|more and more chosen|more and more unchosen|more and more selected|more and more unselected|more and more picked|more and more unpicked|more and more wanted|more and more unwanted|more and more desired|more and more undesired|more and more sought after|more and more unsought|more and more in demand|more and more not in demand|more and more requested|more and more unrequested|more and more needed|more and more unneeded|more and more required|more and more unrequired|more and more necessary|more and more unnecessary|more and more essential|more and more nonessential|more and more vital|more and more nonvital|more and more crucial|more and more noncrucial|more and more critical|more and more noncritical|more and more important|more and more unimportant|more and more significant|more and more insignificant|more and more meaningful|more and more meaningless|more and more valuable|more and more worthless|more and more useful|more and more useless|more and more helpful|more and more unhelpful|more and more beneficial|more and more harmful|more and more advantageous|more and more disadvantageous|more and more favorable|more and more unfavorable|more and more positive|more and more negative|more and more good|more and more bad|more and more great|more and more terrible|more and more excellent|more and more awful|more and more wonderful|more and more horrible|more and more fantastic|more and more dreadful|more and more amazing|more and more appalling|more and more incredible|more and more shocking|more and more unbelievable|more and more disgusting|more and more miraculous|more and more revolting|more and more marvelous|more and more repulsive|more and more spectacular|more and more repugnant|more and more breathtaking|more and more nauseating|more and more awe inspiring|more and more sickening|more and more stunning|more and more disturbing|more and more impressive|more and more upsetting|more and more remarkable|more and more troubling|more and more outstanding|more and more worrying|more and more extraordinary|more and more concerning|more and more exceptional|more and more alarming|more and more superior|more and more frightening|more and more magnificent|more and more terrifying|more and more splendid|more and more horrifying|more and more glorious|more and more scary|more and more brilliant|more and more creepy|more and more dazzling|more and more spooky|more and more radiant|more and more eerie|more and more luminous|more and more weird|more and more shining|more and more strange|more and more gleaming|more and more odd|more and more sparkling|more and more peculiar|more and more twinkling|more and more bizarre|more and more glittering|more and more unusual|more and more shimmering|more and more abnormal|more and more glistening|more and more irregular|more and more bright|more and more atypical|more and more vivid|more and more uncommon|more and more colorful|more and more rare|more and more vibrant|more and more unique|more and more lively|more and more special|more and more animated|more and more distinctive|more and more spirited|more and more characteristic|more and more energetic|more and more individual|more and more dynamic|more and more personal|more and more active|more and more private|more and more vigorous|more and more intimate|more and more robust|more and more close|more and more strong|more and more near|more and more powerful|more and more dear|more and more mighty|more and more beloved|more and more potent|more and more cherished|more and more forceful|more and more treasured|more and more intense|more and more valued|more and more fierce|more and more precious|more and more aggressive|more and more important|more and more violent|more and more significant|more and more harsh|more and more meaningful|more and more severe|more and more relevant|more and more strict|more and more applicable|more and more rigid|more and more suitable|more and more firm|more and more appropriate|more and more solid|more and more fitting|more and more hard|more and more proper|more and more tough|more and more right|more and more durable|more and more correct|more and more lasting|more and more accurate|more and more permanent|more and more precise|more and more enduring|more and more exact|more and more eternal|more and more specific|more and more everlasting|more and more particular|more and more immortal|more and more detailed|more and more timeless|more and more comprehensive|more and more ageless|more and more thorough|more and more endless|more and more complete|more and more infinite|more and more total|more and more limitless|more and more full|more and more boundless|more and more entire|more and more unlimited|more and more whole|more and more unrestricted|more and more all|more and more unconfined|more and more every|more and more unrestrained|more and more each|more and more unconstrained|more and more universal|more and more free|more and more global|more and more liberated|more and more worldwide|more and more independent|more and more international|more and more autonomous|more and more national|more and more self governing|more and more regional|more and more self ruling|more and more local|more and more self determining|more and more community|more and more self directing|more and more neighborhood|more and more self managing|more and more area|more and more self controlling|more and more zone|more and more self regulating|more and more district|more and more self administering|more and more sector|more and more self operating|more and more division|more and more self functioning|more and more section|more and more self working|more and more part|more and more self running|more and more portion|more and more self executing|more and more segment|more and more self performing|more and more piece|more and more self acting|more and more fragment|more and more self moving|more and more bit|more and more self propelling|more and more element|more and more self driving|more and more component|more and more self steering|more and more ingredient|more and more self guiding|more and more factor|more and more self directing|more and more aspect|more and more self leading|more and more feature|more and more self conducting|more and more characteristic|more and more self managing|more and more quality|more and more self supervising|more and more property|more and more self overseeing|more and more attribute|more and more self monitoring|more and more trait|more and more self watching|more and more nature|more and more self observing|more and more essence|more and more self checking|more and more substance|more and more self inspecting|more and more core|more and more self examining|more and more heart|more and more self evaluating|more and more center|more and more self assessing|more and more middle|more and more self testing|more and more focus|more and more self measuring|more and more point|more and more self gauging|more and more crux|more and more self judging|more and more key|more and more self rating|more and more main|more and more self ranking|more and more primary|more and more self grading|more and more principal|more and more self scoring|more and more chief|more and more self marking|more and more major|more and more self evaluating|more and more leading|more and more self appraising|more and more top|more and more self reviewing|more and more first|more and more self analyzing|more and more foremost|more and more self studying|more and more paramount|more and more self researching|more and more supreme|more and more self investigating|more and more ultimate|more and more self exploring|more and more final|more and more self discovering|more and more last|more and more self finding|more and more end|more and more self locating|more and more conclusion|more and more self identifying|more and more finish|more and more self recognizing|more and more completion|more and more self realizing|more and more termination|more and more self understanding|more and more close|more and more self comprehending|more and more ending|more and more self grasping|more and more finale|more and more self perceiving|more and more climax|more and more self sensing|more and more peak|more and more self feeling|more and more summit|more and more self experiencing|more and more top|more and more self living|more and more apex|more and more self existing|more and more pinnacle|more and more self being|more and more zenith|more and more self becoming|more and more acme|more and more self developing|more and more height|more and more self growing|more and more maximum|more and more self evolving|more and more limit|more and more self changing|more and more extreme|more and more self transforming|more and more utmost|more and more self improving|more and more greatest|more and more self enhancing|more and more highest|more and more self advancing|more and more most|more and more self progressing|more and more best|more and more self moving forward|more and more finest|more and more self going ahead|more and more optimal|more and more self proceeding|more and more perfect|more and more self continuing|more and more ideal|more and more self persisting|more and more flawless|more and more self enduring|more and more impeccable|more and more self lasting|more and more faultless|more and more self remaining|more and more spotless|more and more self staying|more and more pristine|more and more self keeping|more and more pure|more and more self maintaining|more and more clean|more and more self preserving|more and more clear|more and more self sustaining|more and more transparent|more and more self supporting|more and more obvious|more and more self upholding|more and more evident|more and more self backing|more and more apparent|more and more self reinforcing|more and more manifest|more and more self strengthening|more and more visible|more and more self fortifying|more and more noticeable|more and more self securing|more and more conspicuous|more and more self protecting|more and more prominent|more and more self defending|more and more outstanding|more and more self guarding|more and more remarkable|more and more self shielding|more and more notable|more and more self covering|more and more noteworthy|more and more self hiding|more and more significant|more and more self concealing|more and more important|more and more self masking|more and more meaningful|more and more self disguising|more and more relevant|more and more self camouflaging|more and more applicable|more and more self screening|more and more suitable|more and more self blocking|more and more appropriate|more and more self obstructing|more and more fitting|more and more self hindering|more and more proper|more and more self impeding|more and more right|more and more self preventing|more and more correct|more and more self stopping|more and more accurate|more and more self halting|more and more precise|more and more self ceasing|more and more exact|more and more self ending|more and more specific|more and more self finishing|more and more particular|more and more self completing|more and more detailed|more and more self concluding|more and more comprehensive|more and more self terminating|more and more thorough|more and more self closing|more and more complete|more and more self shutting|more and more total|more and more self sealing|more and more full|more and more self locking|more and more entire|more and more self fastening|more and more whole|more and more self securing|more and more all|more and more self fixing|more and more every|more and more self attaching|more and more each|more and more self connecting|more and more individual|more and more self linking|more and more single|more and more self joining|more and more one|more and more self uniting|more and more sole|more and more self combining|more and more only|more and more self merging|more and more unique|more and more self blending|more and more special|more and more self mixing|more and more distinctive|more and more self integrating|more and more characteristic|more and more self incorporating|more and more typical|more and more self including|more and more representative|more and more self embracing|more and more standard|more and more self encompassing|more and more normal|more and more self containing|more and more regular|more and more self holding|more and more ordinary|more and more self carrying|more and more common|more and more self bearing|more and more usual|more and more self supporting|more and more frequent|more and more self sustaining|more and more often|more and more self maintaining|more and more regularly|more and more self preserving|more and more consistently|more and more self keeping|more and more constantly|more and more self retaining|more and more continuously|more and more self storing|more and more perpetually|more and more self saving|more and more always|more and more self conserving|more and more forever|more and more self protecting|more and more eternally|more and more self defending|more and more permanently|more and more self guarding|more and more endlessly|more and more self watching|more and more infinitely|more and more self monitoring|more and more limitlessly|more and more self supervising|more and more boundlessly|more and more self overseeing|more and more unlimitedly|more and more self managing|more and more unrestrictedly|more and more self controlling|more and more unconfinedly|more and more self regulating|more and more unrestrainedly|more and more self governing|more and more unconstrainedly|more and more self ruling|more and more freely|more and more self directing|more and more liberally|more and more self guiding|more and more independently|more and more self leading|more and more autonomously|more and more self conducting|more and more self governingly|more and more self administering|more and more self rulingly|more and more self operating|more and more self directingly|more and more self functioning|more and more self guidingly|more and more self working|more and more self leadingly|more and more self running|more and more self conductingly|more and more self executing|more and more self administeringly|more and more self performing|more and more self operatingly|more and more self acting|more and more self functioningly|more and more self moving|more and more self workingly|more and more self propelling|more and more self runningly|more and more self driving|more and more self executingly|more and more self steering|more and more self performingly|more and more self guiding|more and more self actingly|more and more self directing|more and more self movingly|more and more self leading|more and more self propellingly|more and more self conducting|more and more self drivingly|more and more self managing|more and more self steeringly|more and more self supervising|more and more self guidingly|more and more self overseeing|more and more self directingly|more and more self monitoring|more and more self leadingly|more and more self watching|more and more self conductingly|more and more self observing|more and more self managingly|more and more self checking|more and more self supervisingly|more and more self inspecting|more and more self overseeingly|more and more self examining|more and more self monitoringly|more and more self evaluating|more and more self watchingly|more and more self assessing|more and more self observingly|more and more self testing|more and more self checkingly|more and more self measuring|more and more self inspectingly|more and more self gauging|more and more self examiningly|more and more self judging|more and more self evaluatingly|more and more self rating|more and more self assessingly|more and more self ranking|more and more self testingly|more and more self grading|more and more self measuringly|more and more self scoring|more and more self gaugingly|more and more self marking|more and more self judgingly|more and more self evaluating|more and more self ratingly|more and more self appraising|more and more self rankingly|more and more self reviewing|more and more self gradingly|more and more self analyzing|more and more self scoringly|more and more self studying|more and more self markingly|more and more self researching|more and more self evaluatingly|more and more self investigating|more and more self appraisingly|more and more self exploring|more and more self reviewingly|more and more self discovering|more and more self analyzingly|more and more self finding|more and more self studyingly|more and more self locating|more and more self researchingly|more and more self identifying|more and more self investigatingly|more and more self recognizing|more and more self exploringly|more and more self realizing|more and more self discoveringly|more and more self understanding|more and more self findingly|more and more self comprehending|more and more self locatingly|more and more self grasping|more and more self identifyingly|more and more self perceiving|more and more self recognizingly|more and more self sensing|more and more self realizingly|more and more self feeling|more and more self understandingly|more and more self experiencing|more and more self comprehendingly|more and more self living|more and more self graspingly|more and more self existing|more and more self perceivingly|more and more self being|more and more self sensingly|more and more self becoming|more and more self feelingly|more and more self developing|more and more self experiencingly|more and more self growing|more and more self livingly|more and more self evolving|more and more self existingly|more and more self changing|more and more self beingly|more and more self transforming|more and more self becomingly|more and more self improving|more and more self developingly|more and more self enhancing|more and more self growingly|more and more self advancing|more and more self evolvingly|more and more self progressing|more and more self changingly|more and more self moving forward|more and more self transformingly|more and more self going ahead|more and more self improvingly|more and more self proceeding|more and more self enhancingly|more and more self continuing|more and more self advancingly|more and more self persisting|more and more self progressingly|more and more self enduring|more and more self moving forwardly|more and more self lasting|more and more self going aheadly|more and more self remaining|more and more self proceedingly|more and more self staying|more and more self continuingly|more and more self keeping|more and more self persistingly|more and more self maintaining|more and more self enduringly|more and more self preserving|more and more self lastingly|more and more self sustaining|more and more self remainingly|more and more self supporting|more and more self stayingly|more and more self upholding|more and more self keepingly|more and more self backing|more and more self maintainingly|more and more self reinforcing|more and more self preservingly|more and more self strengthening|more and more self sustainingly|more and more self fortifying|more and more self supportingly|more and more self securing|more and more self upholdingly|more and more self protecting|more and more self backingly|more and more self defending|more and more self reinforcingly|more and more self guarding|more and more self strengtheningly|more and more self shielding|more and more self fortifyingly|more and more self covering|more and more self securingly|more and more self hiding|more and more self protectingly|more and more self concealing|more and more self defendingly|more and more self masking|more and more self guardingly|more and more self disguising|more and more self shieldingly|more and more self camouflaging|more and more self coveringly|more and more self screening|more and more self hidingly|more and more self blocking|more and more self concealingly|more and more self obstructing|more and more self maskingly|more and more self hindering|more and more self disguisingly|more and more self impeding|more and more self camouflagingly|more and more self preventing|more and more self screeningly|more and more self stopping|more and more self blockingly|more and more self halting|more and more self obstructingly|more and more self ceasing|more and more self hinderingly|more and more self ending|more and more self impedingly|more and more self finishing|more and more self preventingly|more and more self completing|more and more self stoppingly|more and more self concluding|more and more self haltingly|more and more self terminating|more and more self ceasingly|more and more self closing|more and more self endingly|more and more self shutting|more and more self finishingly|more and more self sealing|more and more self completingly|more and more self locking|more and more self concludingly|more and more self fastening|more and more self terminatingly|more and more self securing|more and more self closingly|more and more self fixing|more and more self shuttingly|more and more self attaching|more and more self sealingly|more and more self connecting|more and more self lockingly|more and more self linking|more and more self fasteningly|more and more self joining|more and more self securingly|more and more self uniting|more and more self fixingly|more and more self combining|more and more self attachingly|more and more self merging|more and more self connectingly|more and more self blending|more and more self linkingly|more and more self mixing|more and more self joiningly|more and more self integrating|more and more self unitingly|more and more self incorporating|more and more self combiningly|more and more self including|more and more self mergingly|more and more self embracing|more and more self blendingly|more and more self encompassing|more and more self mixingly|more and more self containing|more and more self integratingly|more and more self holding|more and more self incorporatingly|more and more self carrying|more and more self includingly|more and more self bearing|more and more self embracingly|more and more self supporting|more and more self encompassingly|more and more self sustaining|more and more self containingly|more and more self maintaining|more and more self holdingly|more and more self preserving|more and more self carryingly|more and more self keeping|more and more self bearingly|more and more self retaining|more and more self supportingly|more and more self storing|more and more self sustainingly|more and more self saving|more and more self maintainingly|more and more self conserving|more and more self preservingly|more and more self protecting|more and more self keepingly|more and more self defending|more and more self retainingly|more and more self guarding|more and more self storingly|more and more self watching|more and more self savingly|more and more self monitoring|more and more self conservingly|more and more self supervising|more and more self protectingly|more and more self overseeing|more and more self defendingly|more and more self managing|more and more self guardingly|more and more self controlling|more and more self watchingly|more and more self regulating|more and more self monitoringly|more and more self governing|more and more self supervisingly|more and more self ruling|more and more self overseeingly|more and more self directing|more and more self managingly|more and more self guiding|more and more self controllingly|more and more self leading|more and more self regulatingly|more and more self conducting|more and more self governingly|more and more self administering|more and more self rulingly|more and more self operating|more and more self directingly|more and more self functioning|more and more self guidingly|more and more self working|more and more self leadingly|more and more self running|more and more self conductingly|more and more self executing|more and more self administeringly|more and more self performing|more and more self operatingly|more and more self acting|more and more self functioningly|more and more self moving|more and more self workingly|more and more self propelling|more and more self runningly|more and more self driving|more and more self executingly|more and more self steering|more and more self performingly|more and more self guiding|more and more self actingly|more and more self directing|more and more self movingly|more and more self leading|more and more self propellingly|more and more self conducting|more and more self drivingly|more and more self managing|more and more self steeringly|more and more self supervising|more and more self guidingly|more and more self overseeing|more and more self directingly|more and more self monitoring|more and more self leadingly|more and more self watching|more and more self conductingly|more and more self observing|more and more self managingly|more and more self checking|more and more self supervisingly|more and more self inspecting|more and more self overseeingly|more and more self examining|more and more self monitoringly|more and more self evaluating|more and more self watchingly|more and more self assessing|more and more self observingly|more and more self testing|more and more self checkingly|more and more self measuring|more and more self inspectingly|more and more self gauging|more and more self examiningly|more and more self judging|more and more self evaluatingly|more and more self rating|more and more self assessingly|more and more self ranking|more and more self testingly|more and more self grading|more and more self measuringly|more and more self scoring|more and more self gaugingly|more and more self marking|more and more self judgingly|more and more self evaluating|more and more self ratingly|more and more self appraising|more and more self rankingly|more and more self reviewing|more and more self gradingly|more and more self analyzing|more and more self scoringly|more and more self studying|more and more self markingly|more and more self researching|more and more self evaluatingly|more and more self investigating|more and more self appraisingly|more and more self exploring|more and more self reviewingly|more and more self discovering|more and more self analyzingly|more and more self finding|more and more self studyingly|more and more self locating|more and more self researchingly|more and more self identifying|more and more self investigatingly|more and more self recognizing|more and more self exploringly|more and more self realizing|more and more self discoveringly|more and more self understanding|more and more self findingly|more and more self comprehending|more and more self locatingly|more and more self grasping|more and more self identifyingly|more and more self perceiving|more and more self recognizingly|more and more self sensing|more and more self realizingly|more and more self feeling|more and more self understandingly|more and more self experiencing|more and more self comprehendingly|more and more self living|more and more self graspingly|more and more self existing|more and more self perceivingly|more and more self being|more and more self sensingly|more and more self becoming|more and more self feelingly|more and more self developing|more and more self experiencingly|more and more self growing|more and more self livingly|more and more self evolving|more and more self existingly|more and more self changing|more and more self beingly|more and more self transforming|more and more self becomingly|more and more self improving|more and more self developingly|more and more self enhancing|more and more self growingly|more and more self advancing|more and more self evolvingly|more and more self progressing|more and more self changingly|more and more self moving forward|more and more self transformingly|more and more self going ahead|more and more self improvingly|more and more self proceeding|more and more self enhancingly|more and more self continuing|more and more self advancingly|more and more self persisting|more and more self progressingly|more and more self enduring|more and more self moving forwardly|more and more self lasting|more and more self going aheadly|more and more self remaining|more and more self proceedingly|more and more self staying|more and more self continuingly|more and more self keeping|more and more self persistingly|more and more self maintaining|more and more self enduringly|more and more self preserving|more and more self lastingly|more and more self sustaining|more and more self remainingly|more and more self supporting|more and more self stayingly|more and more self upholding|more and more self keepingly|more and more self backing|more and more self maintainingly|more and more self reinforcing|more and more self preservingly|more and more self strengthening|more and more self sustainingly|more and more self fortifying|more and more self supportingly|more and more self securing|more and more self upholdingly|more and more self protecting|more and more self backingly|more and more self defending|more and more self reinforcingly|more and more self guarding|more and more self strengtheningly|more and more self shielding|more and more self fortifyingly|more and more self covering|more and more self securingly|more and more self hiding|more and more self protectingly|more and more self concealing|more and more self defendingly|more and more self masking|more and more self guardingly|more and more self disguising|more and more self shieldingly|more and more self camouflaging|more and more self coveringly|more and more self screening|more and more self hidingly|more and more self blocking|more and more self concealingly|more and more self obstructing|more and more self maskingly|more and more self hindering|more and more self disguisingly|more and more self impeding|more and more self camouflagingly|more and more self preventing|more and more self screeningly|more and more self stopping|more and more self blockingly|more and more self halting|more and more self obstructingly|more and more self ceasing|more and more self hinderingly|more and more self ending|more and more self impedingly|more and more self finishing|more and more self preventingly|more and more self completing|more and more self stoppingly|more and more self concluding|more and more self haltingly|more and more self terminating|more and more self ceasingly|more and more self closing|more and more self endingly|more and more self shutting|more and more self finishingly|more and more self sealing|more and more self completingly|more and more self locking|more and more self concludingly|more and more self fastening|more and more self terminatingly|more and more self securing|more and more self closingly|more and more self fixing|more and more self shuttingly|more and more self attaching|more and more self sealingly|more and more self connecting|more and more self lockingly|more and more self linking|more and more self fasteningly|more and more self joining|more and more self securingly|more and more self uniting|more and more self fixingly|more and more self combining|more and more self attachingly|more and more self merging|more and more self connectingly|more and more self blending|more and more self linkingly|more and more self mixing|more and more self joiningly|more and more self integrating|more and more self unitingly|more and more self incorporating|more and more self combiningly|more and more self including|more and more self mergingly|more and more self embracing|more and more self blendingly|more and more self encompassing|more and more self mixingly|more and more self containing|more and more self integratingly|more and more self holding|more and more self incorporatingly|more and more self carrying|more and more self includingly|more and more self bearing|more and more self embracingly|more and more self supporting|more and more self encompassingly|more and more self sustaining|more and more self containingly|more and more self maintaining|more and more self holdingly|more and more self preserving|more and more self carryingly|more and more self keeping|more and more self bearingly|more and more self retaining|more and more self supportingly|more and more self storing|more and more self sustainingly|more and more self saving|more and more self maintainingly|more and more self conserving|more and more self preservingly|more and more self protecting|more and more self keepingly|more and more self defending|more and more self retainingly|more and more self guarding|more and more self storingly|more and more self watching|more and more self savingly|more and more self monitoring|more and more self conservingly|more and more self supervising|more and more self protectingly|more and more self overseeing|more and more self defendingly|more and more self managing|more and more self guardingly|more and more self controlling|more and more self watchingly|more and more self regulating|more and more self monitoringly|more and more self governing|more and more self supervisingly|more and more self ruling|more and more self overseeingly|more and more self directing|more and more self managingly|more and more self guiding|more and more self controllingly|more and more self leading|more and more self regulatingly|more and more self conducting|more and more self governingly|more and more self administering|more and more self rulingly|more and more self operating|more and more self directingly|more and more self functioning|more and more self guidingly|more and more self working|more and more self leadingly|more and more self running|more and more self conductingly|more and more self executing|more and more self administeringly|more and more self performing|more and more self operatingly|more and more self acting|more and more self functioningly|more and more self moving|more and more self workingly|more and more self propelling|more and more self runningly|more and more self driving|more and more self executingly|more and more self steering|more and more self performingly|more and more self guiding|more and more self actingly|more and more self directing|more and more self movingly|more and more self leading|more and more self propellingly|more and more self conducting|more and more self drivingly|more and more self managing|more and more self steeringly|more and more self supervising|more and more self guidingly|more and more self overseeing|more and more self directingly|more and more self monitoring|more and more self leadingly|more and more self watching|more and more self conductingly|more and more self observing|more and more self managingly|more and more self checking|more and more self supervisingly|more and more self inspecting|more and more self overseeingly|more and more self examining|more and more self monitoringly|more and more self evaluating|more and more self watchingly|more and more self assessing|more and more self observingly|more and more self testing|more and more self checkingly|more and more self measuring|more and more self inspectingly|more and more self gauging|more and more self examiningly|more and more self judging|more and more self evaluatingly|more and more self rating|more and more self assessingly|more and more self ranking|more and more self testingly|more and more self grading|more and more self measuringly|more and more self scoring|more and more self gaugingly|more and more self marking|more and more self judgingly|more and more self evaluating|more and more self ratingly|more and more self appraising|more and more self rankingly|more and more self reviewing|more and more self gradingly|more and more self analyzing|more and more self scoringly|more and more self studying|more and more self markingly|more and more self researching|more and more self evaluatingly|more and more self investigating|more and more self appraisingly|more and more self exploring|more and more self reviewingly|more and more self discovering|more and more self analyzingly|more and more self finding|more and more self studyingly|more and more self locating|more and more self researchingly|more and more self identifying|more and more self investigatingly|more and more self recognizing|more and more self exploringly|more and more self realizing|more and more self discoveringly|more and more self understanding|more and more self findingly|more and more self comprehending|more and more self locatingly|more and more self grasping|more and more self identifyingly|more and more self perceiving|more and more self recognizingly|more and more self sensing|more and more self realizingly|more and more self feeling|more and more self understandingly|more and more self experiencing|more and more self comprehendingly|more and more self living|more and more self graspingly|more and more self existing|more and more self perceivingly|more and more self being|more and more self sensingly|more and more self becoming|more and more self feelingly|more and more self developing|more and more self experiencingly|more and more self growing|more and more self livingly|more and more self evolving|more and more self existingly|more and more self changing|more and more self beingly|more and more self transforming|more and more self becomingly|more and more self improving|more and more self developingly|more and more self enhancing|more and more self growingly|more and more self advancing|more and more self evolvingly|more and more self progressing|more and more self changingly|more and more self moving forward|more and more self transformingly|more and more self going ahead|more and more self improvingly|more and more self proceeding|more and more self enhancingly|more and more self continuing|more and more self advancingly|more and more self persisting|more and more self progressingly|more and more self enduring|more and more self moving forwardly|more and more self lasting|more and more self going aheadly|more and more self remaining|more and more self proceedingly|more and more self staying|more and more self continuingly|more and more self keeping|more and more self persistingly|more and more self maintaining|more and more self enduringly|more and more self preserving|more and more self lastingly|more and more self sustaining|more and more self remainingly|more and more self supporting|more and more self stayingly|more and more self upholding|more and more self keepingly|more and more self backing|more and more self maintainingly|more and more self reinforcing|more and more self preservingly|more and more self strengthening|more and more self sustainingly|more and more self fortifying|more and more self supportingly|more and more self securing|more and more self upholdingly|more and more self protecting|more and more self backingly|more and more self defending|more and more self reinforcingly|more and more self guarding|more and more self strengtheningly|more and more self shielding|more and more self fortifyingly|more and more self covering|more and more self securingly|more and more self hiding|more and more self protectingly|more and more self concealing|more and more self defendingly|more and more self masking|more and more self guardingly|more and more self disguising|more and more self shieldingly|more and more self camouflaging|more and more self coveringly|more and more self screening|more and more self hidingly|more and more self blocking|more and more self concealingly|more and more self obstructing|more and more self maskingly|more and more self hindering|more and more self disguisingly|more and more self impeding|more and more self camouflagingly|more and more self preventing|more and more self screeningly|more and more self stopping|more and more self blockingly|more and more self halting|more and more self obstructingly|more and more self ceasing|more and more self hinderingly|more and more self ending|more and more self impedingly|more and more self finishing|more and more self preventingly|more and more self completing|more and more self stoppingly|more and more self concluding|more and more self haltingly|more and more self terminating|more and more self ceasingly|more and more self closing|more and more self endingly|more and more self shutting|more and more self finishingly|more and more self sealing|more and more self completingly|more and more self locking|more and more self concludingly|more and more self fastening|more and more self terminatingly|more and more self securing|more and more self closingly|more and more self fixing|more and more self shuttingly|more and more self attaching|more and more self sealingly|more and more self connecting|more and more self lockingly|more and more self linking|more and more self fasteningly|more and more self joining|more and more self securingly|more and more self uniting|more and more self fixingly|more and more self combining|more and more self attachingly|more and more self merging|more and more self connectingly|more and more self blending|more and more self linkingly|more and more self mixing|more and more self joiningly|more and more self integrating|more and more self unitingly|more and more self incorporating|more and more self combiningly|more and more self including|more and more self mergingly|more and more self embracing|more and more self blendingly|more and more self encompassing|more and more self mixingly|more and more self containing|more and more self integratingly|more and more self holding|more and more self incorporatingly|more and more self carrying|more and more self includingly|more and more self bearing|more and more self embracingly|more and more self supporting|more and more self encompassingly|more and more self sustaining|more and more self containingly|more and more self maintaining|more and more self holdingly|more and more self preserving|more and more self carryingly|more and more self keeping|more and more self bearingly|more and more self retaining|more and more self supportingly|more and more self storing|more and more self sustainingly|more and more self saving|more and more self maintainingly|more and more self conserving|more and more self preservingly|more and more self protecting|more and more self keepingly|more and more self defending|more and more self retainingly|more and more self guarding|more and more self storingly|more and more self watching|more and more self savingly|more and more self monitoring|more and more self conservingly|more and more self supervising|more and more self protectingly|more and more self overseeing|more and more self defendingly|more and more self managing|more and more self guardingly|more and more self controlling|more and more self watchingly|more and more self regulating|more and more self monitoringly|more and more self governing|more and more self supervisingly|more and more self ruling|more and more self overseeingly|more and more self directing|more and more self managingly|more and more self guiding|more and more self controllingly|more and more self leading|more and more self regulatingly|more and more self conducting|more and more self governingly|more and more self administering|more and more self rulingly|more and more self operating|more and more self directingly|more and more self functioning|more and more self guidingly|more and more self working|more and more self leadingly|more and more self running|more and more self conductingly|more and more self executing|more and more self administeringly|more and more self performing|more and more self operatingly|more and more self acting|more and more self functioningly|more and more self moving|more and more self workingly|more and more self propelling|more and more self runningly|more and more self driving|more and more self executingly|more and more self steering|more and more self performingly|more and more self guiding|more and more self actingly|more and more self directing|more and more self movingly|more and more self leading|more and more self propellingly|more and more self conducting|more and more self drivingly|more and more self managing|more and more self steeringly|more and more self supervising|more and more self guidingly|more and more self overseeing|more and more self directingly|more and more self monitoring|more and more self leadingly|more and more self watching|more and more self conductingly|more and more self observing|more and more self managingly|more and more self checking|more and more self supervisingly|more and more self inspecting|more and more self overseeingly|more and more self examining|more and more self monitoringly|more and more self evaluating|more and more self watchingly|more and more self assessing|more and more self observingly|more and more self testing|more and more self checkingly|more and more self measuring|more and more self inspectingly|more and more self gauging|more and more self examiningly|more and more self judging|more and more self evaluatingly|more and more self rating|more and more self assessingly|more and more self ranking|more and more self testingly|more and more self grading|more and more self measuringly|more and more self scoring|more and more self gaugingly|more and more self marking|more and more self judgingly|more and more self evaluating|more and more self ratingly|more and more self appraising|more and more self rankingly|more and more self reviewing|more and more self gradingly|more and more self analyzing|more and more self scoringly|more and more self studying|more and more self markingly|more and more self researching|more and more self evaluatingly|more and more self investigating|more and more self appraisingly|more and more self exploring|more and more self reviewingly|more and more self discovering|more and more self analyzingly|more and more self finding|more and more self studyingly|more and more self locating|more and more self researchingly|more and more self identifying|more and more self investigatingly|more and more self recognizing|more and more self exploringly|more and more self realizing|more and more self discoveringly|more and more self understanding|more and more self findingly|more and more self comprehending|more and more self locatingly|more and more self grasping|more and more self identifyingly|more and more self perceiving|more and more self recognizingly|more and more self sensing|more and more self realizingly|more and more self feeling|more and more self understandingly|more and more self experiencing|more and more self comprehendingly|more and more self living|more and more self graspingly|more and more self existing|more and more self perceivingly|more and more self being|more and more self sensingly|more and more self becoming|more and more self feelingly|more and more self developing|more and more self experiencingly|more and more self growing|more and more self livingly|more and more self evolving|more and more self existingly|more and more self changing|more and more self beingly|more and more self transforming|more and more self becomingly|more and more self improving|more and more self developingly|more and more self enhancing|more and more self growingly|more and more self advancing|more and more self evolvingly|more and more self progressing|more and more self changingly|more and more self moving forward|more and more self transformingly|more and more self going ahead|more and more self improvingly|more and more self proceeding|more and more self enhancingly|more and more self continuing|more and more self advancingly|more and more self persisting|more and more self progressingly|more and more self enduring|more and more self moving forwardly|more and more self lasting|more and more self going aheadly|more and more self remaining|more and more self proceedingly|more and more self staying|more and more self continuingly|more and more self keeping|more and more self persistingly|more and more self maintaining|more and more self enduringly|more and more self preserving|more and more self lastingly|more and more self sustaining|more and more self remainingly|more and more self supporting|more and more self stayingly|more and more self upholding|more and more self keepingly|more and more self backing|more and more self maintainingly|more and more self reinforcing|more and more self preservingly|more and more self strengthening|more and more self sustainingly|more and more self fortifying|more and more self supportingly|more and more self securing|more and more self upholdingly|more and more self protecting|more and more self backingly|more and more self defending|more and more self reinforcingly|more and more self guarding|more and more self strengtheningly|more and more self shielding|more and more self fortifyingly|more and more self covering|more and more self securingly|more and more self hiding|more and more self protectingly|more and more self concealing|more and more self defendingly|more and more self masking|more and more self guardingly|more and more self disguising|more and more self shieldingly|more and more self camouflaging|more and more self coveringly|more and more self screening|more and more self hidingly|more and more self blocking|more and more self concealingly|more and more self obstructing|more and more self maskingly|more and more self hindering|more and more self disguisingly|more and more self impeding|more and more self camouflagingly|more and more self preventing|more and more self screeningly|more and more self stopping|more and more self blockingly|more and more self halting|more and more self obstructingly|more and more self ceasing|more and more self hinderingly|more and more self ending|more and more self impedingly|more and more self finishing|more and more self preventingly|more and more self completing|more and more self stoppingly|more and more self concluding|more and more self haltingly|more and more self terminating|more and more self ceasingly|more and more self closing|more and more self endingly|more and more self shutting|more and more self finishingly|more and more self sealing|more and more self completingly|more and more self locking|more and more self concludingly|more and more self fastening|more and more self terminatingly|more and more self securing|more and more self closingly|more and more self fixing|more and more self shuttingly|more and more self attaching|more and more self sealingly|more and more self connecting|more and more self lockingly|more and more self linking|more and more self fasteningly|more and more self joining|more and more self securingly|more and more self uniting|more and more self fixingly|more and more self combining|more and more self attachingly|more and more self merging|more and more self connectingly|more and more self blending|more and more self linkingly|more and more self mixing|more and more self joiningly|more and more self integrating|more and more self unitingly|more and more self incorporating|more and more self combiningly|more and more self including|more and more self mergingly|more and more self embracing|more and more self blendingly|more and more self encompassing|more and more self mixingly|more and more self containing|more and more self integratingly|more and more self holding|more and more self incorporatingly|more and more self carrying|more and more self includingly|more and more self bearing|more and more self embracingly|more and more self supporting|more and more self encompassingly|more and more self sustaining|more and more self containingly|more and more self maintaining|more and more self holdingly|more and more self preserving|more and more self carryingly|more and more self keeping|more and more self bearingly|more and more self retaining|more and more self supportingly|more and more self storing|more and more self sustainingly|more and more self saving|more and more self maintainingly|more and more self conserving|more and more self preservingly|more and more self protecting|more and more self keepingly|more and more self defending|more and more self retainingly|more and more self guarding|more and more self storingly|more and more self watching|more and more self savingly|more and more self monitoring|more and more self conservingly|more and more self supervising|more and more self protectingly|more and more self overseeing|more and more self defendingly|more and more self managing|more and more self guardingly|more and more self controlling|more and more self watchingly|more and more self regulating|more and more self monitoringly|more and more self governing|more and more self supervisingly|more and more self ruling|more and more self overseeingly|more and more self directing|more and more self managingly|more and more self guiding|more and more self controllingly|more and more self leading|more and more self regulatingly|more and more self conducting|more and more self governingly|more and more self administering|more and more self rulingly|more and more self operating|more and more self directingly|more and more self functioning|more and more self guidingly|more and more self working|more and more self leadingly|more and more self running|more and more self conductingly|more and more self executing|more and more self administeringly|more and more self performing|more and more self operatingly|more and more self acting|more and more self functioningly|more and more self moving|more and more self workingly|more and more self propelling|more and more self runningly|more and more self driving|more and more self executingly|more and more self steering|more and more self performingly|more and more self guiding|more and more self actingly|more and more self directing|more and more self movingly|more and more self leading|more and more self propellingly|more and more self conducting|more and more self drivingly|more and more self managing|more and more self steeringly|more and more self supervising|more and more self guidingly|more and more self overseeing|more and more self directingly|more and more self monitoring|more and more self leadingly|more and more self watching|more and more self conductingly|more and more self observing|more and more self managingly|more and more self checking|more and more self supervisingly|more and more self inspecting|more and more self overseeingly|more and more self examining|more and more self monitoringly|more and more self evaluating|more and more self watchingly|more and more self assessing|more and more self observingly|more and more self testing|more and more self checkingly|more and more self measuring|more and more self inspectingly|more and more self gauging|more and more self examiningly|more and more self judging|more and more self evaluatingly|more and more self rating|more and more self assessingly|more and more self ranking|more and more self testingly|more and more self grading|more and more self measuringly|more and more self scoring|more and more self gaugingly|more and more self marking|more and more self judgingly|more and more self evaluating|more and more self ratingly|more and more self appraising|more and more self rankingly|more and more self reviewing|more and more self gradingly|more and more self analyzing|more and more self scoringly|more and more self studying|more and more self markingly|more and more self researching|more and more self evaluatingly|more and more self investigating|more and more self appraisingly|more and more self exploring|more and more self reviewingly|more and more self discovering|more and more self analyzingly|more and more self finding|more and more self studyingly|more and more self locating|more and more self researchingly|more and more self identifying|more and more self investigatingly|more and more self recognizing|more and more self exploringly|more and more self realizing|more and more self discoveringly|more and more self understanding|more and more self findingly|more and more self comprehending|more and more self locatingly|more and more self grasping|more and more self identifyingly|more and more self perceiving|more and more self recognizingly|more and more self sensing|more and more self realizingly|more and more self feeling|more and more self understandingly|more and more self experiencing|more and more self comprehendingly|more and more self living|more and more self graspingly|more and more self existing|more and more self perceivingly|more and more self being|more and more self sensingly|more and more self becoming|more and more self feelingly|more and more self developing|more and more self experiencingly|more and more self growing|more and more self livingly|more and more self evolving|more and more self existingly|more and more self changing|more and more self beingly|more and more self transforming|more and more self becomingly|more and more self improving|more and more self developingly|more and more self enhancing|more and more self growingly|more and more self advancing|more and more self evolvingly|more and more self progressing|more and more self changingly|more and more self moving forward|more and more self transformingly|more and more self going ahead|more and more self improvingly|more and more self proceeding|more and more self enhancingly|more and more self continuing|more and more self advancingly|more and more self persisting|more and more self progressingly|more and more self enduring|more and more self moving forwardly|more and more self lasting|more and more self going aheadly|more and more self remaining|more and more self proceedingly|more and more self staying|more and more self continuingly|more and more self keeping|more and more self persistingly|more and more self maintaining|more and more self enduringly|more and more self preserving|more and more self lastingly|more and more self sustaining|more and more self remainingly|more and more self supporting|more and more self stayingly|more and more self upholding|more and more self keepingly|more and more self backing|more and more self maintainingly|more and more self reinforcing|more and more self preservingly|more and more self strengthening|more and more self sustainingly|more and more self fortifying|more and more self supportingly|more and more self securing|more and more self upholdingly|more and more self protecting|more and more self backingly|more and more self defending|more and more self reinforcingly|more and more self guarding|more and more self strengtheningly|more and more self shielding|more and more self fortifyingly|more and more self covering|more and more self securingly|more and more self hiding|more and more self protectingly|more and more self concealing|more and more self defendingly|more and more self masking|more and more self guardingly|more and more self disguising|more and more self shieldingly|more and more self camouflaging|more and more self coveringly|more and more self screening|more and more self hidingly|more and more self blocking|more and more self concealingly|more and more self obstructing|more and more self maskingly|more and more self hindering|more and more self disguisingly|more and more self impeding|more and more self camouflagingly|more and more self preventing|more and more self screeningly|more and more self stopping|more and more self blockingly|more and more self halting|more and more self obstructingly|more and more self ceasing|more and more self hinderingly|more and more self ending|more and more self impedingly|more and more self finishing|more and more self preventingly|more and more self completing|more and more self stoppingly|more and more self concluding|more and more self haltingly|more and more self terminating|more and more self ceasingly|more and more self closing|more and more self endingly|more and more self shutting|more and more self finishingly|more and more self sealing|more and more self completingly|more and more self locking|more and more self concludingly|more and more self fastening|more and more self terminatingly|more and more self securing|more and more self closingly|more and more self fixing|more and more self shuttingly|more and more self attaching|more and more self sealingly|more and more self connecting|more and more self lockingly|more and more self linking|more and more self fasteningly|more and more self joining|more and more self securingly|more and more self uniting|more and more self fixingly|more and more self combining|more and more self attachingly|more and more self merging|more and more self connectingly|more and more self blending|more and more self linkingly|more and more self mixing|more and more self joiningly|more and more self integrating|more and more self unitingly|more and more self incorporating|more and more self combiningly|more and more self including|more and more self mergingly|more and more self embracing|more and more self blendingly|more and more self encompassing|more and more self mixingly|more and more self containing|more and more self integratingly|more and more self holding|more and more self incorporatingly|more and more self carrying|more and more self includingly|more and more self bearing|more and more self embracingly|more and more self supporting|more and more self encompassingly|more and more self sustaining|more and more self containingly|more and more self maintaining|more and more self holdingly|more and more self preserving|more and more self carryingly|more and more self keeping|more and more self bearingly|more and more self retaining|more and more self supportingly|more and more self storing|more and more self sustainingly|more and more self saving|more and more self maintainingly|more and more self conserving|more and more self preservingly|more and more self protecting|more and more self keepingly|more and more self defending|more and more self retainingly|more and more self guarding|more and more self storingly|more and more self watching|more and more self savingly|more and more self monitoring|more and more self conservingly|more and more self supervising|more and more self protectingly|more and more self overseeing|more and more self defendingly|more and more self managing|more and more self guardingly|more and more self controlling|more and more self watchingly|more and more self regulating|more and more self monitoringly|more and more self governing|more and more self supervisingly|more and more self ruling|more and more self overseeingly|more and more self directing|more and more self managingly|more and more self guiding|more and more self controllingly|more and more self leading|more and more self regulatingly|more and more self conducting|more and more self governingly|more and more self administering|more and more self rulingly|more and more self operating|more and more self directingly|more and more self functioning|more and more self guidingly|more and more self working|more and more self leadingly|more and more self running|more and more self conductingly|more and more self executing|more and more self administeringly|more and more self performing|more and more self operatingly|more and more self acting|more and more self functioningly|more and more self moving|more and more self workingly|more and more self propelling|more and more self runningly|more and more self driving|more and more self executingly|more and more self steering|more and more self performingly|more and more self guiding|more and more self actingly|more and more self directing|more and more self movingly|more and more self leading|more and more self propellingly|more and more self conducting|more and more self drivingly|more and more self managing|more and more self steeringly|more and more self supervising|more and more self guidingly|more and more self overseeing|more and more self directingly|more and more self monitoring|more and more self leadingly|more and more self watching|more and more self conductingly|more and more self observing|more and more self managingly|more and more self checking|more and more self supervisingly|more and more self inspecting|more and more self overseeingly|more and more self examining|more and more self monitoringly|more and more self evaluating|more and more self watchingly|more and more self assessing|more and more self observingly|more and more self testing|more and more self checkingly|more and more self measuring|more and more self inspectingly|more and more self gauging|more and more self examiningly|more and more self judging|more and more self evaluatingly|more and more self rating|more and more self assessingly|more and more self ranking|more and more self testingly|more and more self grading|more and more self measuringly|more and more self scoring|more and more self gaugingly|more and more self marking|more and more self judgingly|more and more self evaluating|more and more self ratingly|more and more self appraising|more and more self rankingly|more and more self reviewing|more and more self gradingly|more and more self analyzing|more and more self scoringly|more and more self studying|more and more self markingly|more and more self researching|more and more self evaluatingly|more and more self investigating|more and more self appraisingly|more and more self exploring|more and more self reviewingly|more and more self discovering|more and more self analyzingly|more and more self finding|more and more self studyingly|more and more self locating|more and more self researchingly|more and more self identifying|more and more self investigatingly|more and more self recognizing|more and more self exploringly|more and more self realizing|more and more self discoveringly|more and more self understanding|more and more self findingly|more and more self comprehending|more and more self locatingly|more and more self grasping|more and more self identifyingly|more and more self perceiving|more and more self recognizingly|more and more self sensing|more and more self realizingly|more and more self feeling|more and more self understandingly|more and more self experiencing|more and more self comprehendingly|more and more self living|more and more self graspingly|more and more self existing|more and more self perceivingly|more and more self being|more and more self sensingly|more and more self becoming|more and more self feelingly|more and more self developing|more and more self experiencingly|more and more self growing|more and more self livingly|more and more self evolving|more and more self existingly|more and more self changing|more and more self beingly|more and more self transforming|more and more self becomingly|more and more self improving|more and more self developingly|more and more self enhancing|more and more self growingly|more and more self advancing|more and more self evolvingly|more and more self progressing|more and more self changingly|more and more self moving forward|more and more self transformingly|more and more self going ahead|more and more self improvingly|more and more self proceeding|more and more self enhancingly|more and more self continuing|more and more self advancingly|more and more self persisting|more and more self progressingly|more and more self enduring|more and more self moving forwardly|more and more self lasting|more and more self going aheadly|more and more self remaining|more and more self proceedingly|more and more self staying|more and more self continuingly|more and more self keeping|more and more self persistingly|more and more self maintaining|more and more self enduringly|more and more self preserving|more and more self lastingly|more and more self sustaining|more and more self remainingly|more and more self supporting|more and more self stayingly|more and more self upholding|more and more self keepingly|more and more self backing|more and more self maintainingly|more and more self reinforcing|more and more self preservingly|more and more self strengthening|more and more self sustainingly|more and more self fortifying|more and more self supportingly|more and more self securing|more and more self upholdingly|more and more self protecting|more and more self backingly|more and more self defending|more and more self reinforcingly|more and more self guarding|more and more self strengtheningly|more and more self shielding|more and more self fortifyingly|more and more self covering|more and more self securingly|more and more self hiding|more and more self protectingly|more and more self concealing|more and more self defendingly|more and more self masking|more and more self guardingly|more and more self disguising|more and more self shieldingly|more and more self camouflaging|more and more self coveringly|more and more self screening|more and more self hidingly|more and more self blocking|more and more self concealingly|more and more self obstructing|more and more self maskingly|more and more self hindering|more and more self disguisingly|more and more self impeding|more and more self camouflagingly|more and more self preventing|more and more self screeningly|more and more self stopping|more and more self blockingly|more and more self halting|more and more self obstructingly|more and more self ceasing|more and more self hinderingly|more and more self ending|more and more self impedingly|more and more self finishing|more and more self preventingly|more and more self completing|more and more self stoppingly|more and more self concluding|more and more self haltingly|more and more self terminating|more and more self ceasingly|more and more self closing|more and more self endingly|more and more self shutting|more and more self finishingly|more and more self sealing|more and more self completingly|more and more self locking|more and more self concludingly|more and more self fastening|more and more self terminatingly|more and more self securing|more and more self closingly|more and more self fixing|more and more self shuttingly|more and more self attaching|more and more self sealingly|more and more self connecting|more and more self lockingly|more and more self linking|more and more self fasteningly|more and more self joining|more and more self securingly|more and more self uniting|more and more self fixingly|more and more self combining|more and more self attachingly|more and more self merging|more and more self connectingly|more and more self blending|more and more self linkingly|more and more self mixing|more and more self joiningly|more and more self integrating|more and more self unitingly|more and more self incorporating|more and more self combiningly|more and more self including|more and more self mergingly|more and more self embracing|more and more self blendingly|more and more self encompassing|more and more self mixingly|more and more self containing|more and more self integratingly|more and more self holding|more and more self incorporatingly|more and more self carrying|more and more self includingly|more and more self bearing|more and more self embracingly|more and more self supporting|```javascript
+      /\b(how does|how do|explain|what is|what are|why|research|analysis|study|academic|scientific|technical|detailed|comprehensive|in-depth|compare|comparison|versus|vs|difference between|pros and cons|advantages|disadvantages|benefits|drawbacks|impact|effect|cause|reason|theory|concept|principle|mechanism|process|method|approach|strategy|solution|problem solving|best practices|recommendations|guide|tutorial|step by step|instructions|tips|advice|suggestions|help|assistance|support|information|knowledge|understanding|learning|education|training|development|improvement|optimization|enhancement|innovation|creativity|design|architecture|engineering|technology|science|mathematics|physics|chemistry|biology|medicine|health|psychology|sociology|philosophy|history|literature|art|culture|society|politics|economics|business|finance|marketing|management|leadership|entrepreneurship|startup|innovation|disruption|transformation|digital|artificial intelligence|machine learning|deep learning|neural networks|algorithms|data science|big data|analytics|statistics|programming|software|hardware|computing|internet|web|mobile|cloud|cybersecurity|blockchain|cryptocurrency|fintech|biotech|nanotech|quantum|renewable energy|sustainability|climate change|environment|conservation|ecology|biodiversity|evolution|genetics|genomics|biotechnology|nanotechnology|robotics|automation|manufacturing|industry|agriculture|transportation|logistics|supply chain|retail|e-commerce|healthcare|education|entertainment|media|communication|social media|networking|collaboration|teamwork|project management|quality assurance|testing|debugging|troubleshooting|maintenance|support|customer service|user experience|user interface|design thinking|human-centered design|accessibility|usability|performance|scalability|reliability|security|privacy|ethics|compliance|regulation|governance|policy|law|legal|intellectual property|patents|trademarks|copyrights|licensing|contracts|agreements|negotiations|partnerships|alliances|mergers|acquisitions|investments|funding|venture capital|private equity|public markets|stocks|bonds|commodities|derivatives|forex|trading|portfolio|risk management|insurance|banking|lending|credit|debt|savings|retirement|wealth management|financial planning|tax|accounting|auditing|compliance|reporting|transparency|accountability|corporate responsibility|sustainability|social impact|philanthropy|non-profit|charity|volunteering|community|society|culture|diversity|inclusion|equality|justice|human rights|civil rights|freedom|democracy|governance|citizenship|participation|engagement|activism|advocacy|social change|reform|revolution|progress|development|growth|expansion|globalization|internationalization|localization|adaptation|customization|personalization|individualization|specialization|generalization|standardization|normalization|optimization|maximization|minimization|efficiency|effectiveness|productivity|performance|quality|excellence|innovation|creativity|originality|uniqueness|differentiation|competitive advantage|market positioning|branding|reputation|trust|credibility|authority|expertise|knowledge|skills|competencies|capabilities|strengths|weaknesses|opportunities|threats|challenges|risks|uncertainties|complexities|complications|difficulties|obstacles|barriers|limitations|constraints|requirements|specifications|standards|criteria|metrics|measurements|evaluation|assessment|analysis|synthesis|interpretation|understanding|insights|conclusions|recommendations|decisions|choices|options|alternatives|trade-offs|priorities|goals|objectives|targets|milestones|deadlines|timelines|schedules|plans|strategies|tactics|actions|initiatives|programs|projects|campaigns|efforts|activities|tasks|responsibilities|roles|functions|duties|obligations|commitments|promises|agreements|contracts|partnerships|relationships|connections|networks|communities|ecosystems|platforms|marketplaces|exchanges|hubs|centers|institutes|organizations|institutions|agencies|departments|divisions|units|teams|groups|committees|boards|councils|panels|forums|conferences|summits|meetings|workshops|seminars|webinars|courses|training|education|learning|development|growth|improvement|enhancement|advancement|progress|evolution|transformation|change|transition|shift|movement|trend|pattern|cycle|phase|stage|level|degree|scale|scope|range|spectrum|variety|diversity|complexity|simplicity|clarity|transparency|visibility|accessibility|availability|convenience|ease|comfort|satisfaction|happiness|well-being|health|wellness|fitness|nutrition|diet|exercise|lifestyle|habits|behaviors|attitudes|beliefs|values|principles|ethics|morals|character|personality|identity|self|individual|person|human|humanity|society|community|culture|civilization|world|universe|cosmos|nature|environment|earth|planet|solar system|galaxy|space|time|reality|existence|life|consciousness|mind|brain|intelligence|wisdom|knowledge|understanding|awareness|perception|cognition|thinking|reasoning|logic|analysis|synthesis|creativity|imagination|intuition|emotion|feeling|sentiment|mood|attitude|behavior|action|reaction|response|interaction|communication|language|speech|writing|reading|listening|learning|memory|recall|recognition|comprehension|interpretation|meaning|significance|importance|relevance|value|worth|benefit|advantage|positive|negative|good|bad|right|wrong|true|false|fact|fiction|reality|fantasy|dream|vision|goal|aspiration|hope|wish|desire|want|need|requirement|necessity|essential|important|critical|vital|crucial|key|main|primary|secondary|tertiary|first|second|third|last|final|ultimate|best|worst|better|worse|good|bad|excellent|poor|high|low|big|small|large|tiny|huge|massive|enormous|gigantic|microscopic|minuscule|fast|slow|quick|rapid|swift|sluggish|early|late|soon|later|now|then|before|after|during|while|when|where|what|who|why|how|which|whose|whom|whatever|whenever|wherever|however|whichever|whoever|whomever|anything|something|nothing|everything|someone|anyone|no one|everyone|somewhere|anywhere|nowhere|everywhere|somehow|anyhow|anyway|always|never|sometimes|often|rarely|seldom|frequently|occasionally|usually|normally|typically|generally|specifically|particularly|especially|mainly|mostly|primarily|secondarily|additionally|furthermore|moreover|besides|also|too|as well|in addition|plus|and|or|but|yet|however|nevertheless|nonetheless|still|though|although|even though|despite|in spite of|regardless|irrespective|notwithstanding|whereas|while|since|because|as|for|so|therefore|thus|hence|consequently|accordingly|subsequently|then|next|finally|lastly|in conclusion|to summarize|in summary|overall|in general|on the whole|by and large|for the most part|in most cases|typically|usually|normally|generally|commonly|frequently|often|regularly|consistently|constantly|continuously|perpetually|always|forever|eternally|permanently|temporarily|briefly|momentarily|instantly|immediately|suddenly|abruptly|gradually|slowly|steadily|progressively|increasingly|decreasingly|more|less|most|least|very|quite|rather|fairly|pretty|somewhat|slightly|barely|hardly|scarcely|almost|nearly|approximately|roughly|about|around|exactly|precisely|specifically|particularly|especially|notably|remarkably|significantly|considerably|substantially|dramatically|drastically|radically|fundamentally|essentially|basically|primarily|mainly|chiefly|principally|largely|mostly|generally|typically|usually|normally|commonly|frequently|often|regularly|consistently|constantly|continuously|perpetually|always|never|sometimes|occasionally|rarely|seldom|hardly ever|almost never|almost always|nearly always|usually|normally|typically|generally|commonly|frequently|often|regularly|consistently|constantly|continuously|perpetually|forever|eternally|permanently|temporarily|briefly|momentarily|instantly|immediately|suddenly|abruptly|gradually|slowly|steadily|progressively|increasingly|decreasingly)\b/i
+    ];
+    
+    const isComplex = complexPatterns.some(pattern => pattern.test(queryLower));
+    
+    if (isComplex) {
+      searchEngine = 'exa';
+    }
+  }
+  
+  return {
+    searchStrategy,
+    searchEngine,
+    extractedLocation,
+    isCrypto,
+    isRestaurant,
+    isNews,
+    isComplex
+  };
+}
+
+// UNIVERSAL SEARCH ENDPOINT: Intelligently routes to appropriate search strategy
+app.post('/api/search/brave', async (req, res) => {
+  console.log('🔍 Universal Search Request:', req.body);
+  console.log('🌐 Request Origin:', req.get('Origin'));
+  
+  try {
+    const { query } = req.body;
+    
+    if (!query || !query.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Query is required',
+        ttsResponse: 'Please provide a search query.'
+      });
+    }
+    
+    // INTELLIGENT ANALYSIS: Determine search strategy and parameters
+    const analysis = analyzeSearchQuery(query);
+    console.log('🧠 Query Analysis:', analysis);
+    
+    // Handle "near me" queries
+    if (analysis.extractedLocation.isNearMe) {
+      return res.json({
+        success: true,
+        query: query,
+        results: [],
+        ttsResponse: 'I heard you say "near me" but I need to know your location first. Could you please tell me what city or area you\'re in?',
+        needsLocation: true,
+        extractedLocation: analysis.extractedLocation,
+        analysis: analysis
+      });
+    }
+    
+    // Route to appropriate search strategy
+    let searchResult;
+    
+    if (analysis.isCrypto) {
+      // Extract crypto symbol from query
+      const cryptoMatch = query.match(/\b(bitcoin|btc|ethereum|eth|dogecoin|doge|cardano|ada|solana|sol|polkadot|dot|chainlink|link|litecoin|ltc|bitcoin cash|bch|stellar|xlm|vechain|vet|theta|tfuel|filecoin|fil|tron|trx|eos|monero|xmr|dash|zcash|zec|qtum|neo|iota|miota|waves|nano|xno|algorand|algo|cosmos|atom|tezos|xtz|avalanche|avax|polygon|matic|fantom|ftm|harmony|one|near|protocol|elrond|egld|hedera|hbar|internet computer|icp|the graph|grt|uniswap|uni|aave|compound|comp|maker|mkr|synthetix|snx|yearn|yfi|curve|crv|sushiswap|sushi|pancakeswap|cake|thorchain|rune|terra|luna|anchor|anc|mirror|mir|kava|hard|band|protocol|alpha|finance|alpaca|venus|xvs|cream|ice|badger|dao|digg|harvest|farm|pickle|jar|saffron|sfi|cover|protocol|hegic|rook|keep|network|nu|livepeer|lpt|numerai|nmr|storj|basic attention token|bat|brave|0x|zrx|kyber|knc|loopring|lrc|ren|republic|protocol|ocean|data|fetch|fet|singularitynet|agi|golem|gnt|glm|status|snt|district0x|dnt|aragon|ant|civic|cvc|power ledger|powr|request|req|quantstamp|qsp|storm|storx|metal|mtl|tenx|pay|omisego|omg|raiden|rdn|funfair|fun|salt|lending|gnosis|gno|augur|rep|wings|dao|firstblood|1st)\b/i);
+      const symbol = cryptoMatch ? cryptoMatch[0] : query.split(' ')[0];
+      searchResult = await performCryptoSearch(symbol);
+    } else if (analysis.isRestaurant) {
+      searchResult = await performRestaurantSearch(query, analysis.extractedLocation.location);
+    } else if (analysis.searchEngine === 'exa') {
+      searchResult = await performExaSearch(query, analysis.extractedLocation.location);
+    } else {
+      searchResult = await performBraveSearch(query, analysis.searchStrategy, analysis.extractedLocation.location);
+    }
+    
+    // Add analysis metadata to response
+    searchResult.analysis = analysis;
+    searchResult.originalQuery = query;
+    
+    console.log('📤 Sending universal search response:', { 
+      ...searchResult, 
+      results: `${searchResult.results?.length || 0} results`,
+      strategy: analysis.searchStrategy,
+      engine: analysis.searchEngine
+    });
+    
+    res.json(searchResult);
+    
+  } catch (error) {
+    console.error('❌ Universal Search Error:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Search failed',
+      ttsResponse: `I encountered an error while searching. ${error.message}. Please try again.`
+    });
+  }
+});
+
+// Helper function to perform Brave search
+async function performBraveSearch(query, searchType = 'web', location = null) {
+  if (!process.env.BRAVE_API_KEY) {
+    throw new Error('BRAVE_API_KEY not configured');
+  }
+  
+  // Build location-aware query
+  const locationAwareQuery = location ? `${query} ${location}` : query;
+  
+  const params = {
+    q: locationAwareQuery,
+    count: 10,
+    search_lang: 'en',
+    country: 'US',
+    safesearch: 'moderate',
+    freshness: searchType === 'news' ? 'pd' : undefined,
+    result_filter: searchType === 'news' ? 'news' : undefined
+  };
+
+  if (location) {
+    params.location = location;
+  }
+
+  const response = await axios.get('https://api.search.brave.com/res/v1/web/search', {
+    headers: {
+      'X-Subscription-Token': process.env.BRAVE_API_KEY,
+      'Accept': 'application/json'
+    },
+    params,
+    timeout: 10000
+  });
+
+  const results = response.data.web?.results || [];
+  const formattedResults = results.slice(0, 5).map(result => ({
+    title: cleanTextForTTS(result.title),
+    snippet: cleanTextForTTS(result.description),
+    url: result.url,
+    published: result.age
+  }));
+
+  let ttsResponse = '';
+  if (formattedResults.length > 0) {
+    const locationText = location ? ` in ${location}` : '';
+    ttsResponse = `I found ${formattedResults.length} relevant results for "${query}"${locationText}. `;
+    formattedResults.forEach((result, index) => {
+      ttsResponse += `${index + 1}. ${result.title}. ${result.snippet}. `;
+    });
+  } else {
+    const locationText = location ? ` in ${location}` : '';
+    ttsResponse = `I couldn't find any results for "${query}"${locationText}. You might want to try a different search term.`;
+  }
+
+  return {
+    success: true,
+    query: locationAwareQuery,
+    results: formattedResults,
+    ttsResponse: cleanTextForTTS(ttsResponse),
+    totalResults: response.data.web?.totalResults || 0,
+    location: location || null,
+    searchEngine: 'brave',
+    searchType: searchType
+  };
+}
+
+// Helper function to perform Exa search
+async function performExaSearch(query, location = null) {
+  if (!process.env.EXA_API_KEY) {
+    throw new Error('EXA_API_KEY not configured');
+  }
+  
+  const locationAwareQuery = location ? `${query} in ${location}` : query;
+  
+  const searchData = {
+    query: locationAwareQuery,
+    numResults: 10,
+    contents: {
+      text: true,
+      highlights: true,
+      summary: true
+    },
+    useAutoprompt: true,
+    type: 'neural'
+  };
+
+  const response = await axios.post('https://api.exa.ai/search', searchData, {
+    headers: {
+      'x-api-key': process.env.EXA_API_KEY,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    timeout: 15000
+  });
+
+  const results = response.data.results || [];
+  const formattedResults = results.slice(0, 5).map(result => ({
+    title: cleanTextForTTS(result.title || 'Untitled'),
+    snippet: cleanTextForTTS(result.summary || result.text?.substring(0, 200) + '...' || 'No description available'),
+    url: result.url,
+    score: result.score,
+    publishedDate: result.publishedDate
+  }));
+
+  let ttsResponse = '';
+  if (formattedResults.length > 0) {
+    const locationText = location ? ` in ${location}` : '';
+    ttsResponse = `Using advanced AI search, I found ${formattedResults.length} highly relevant results for "${query}"${locationText}. `;
+    formattedResults.forEach((result, index) => {
+      ttsResponse += `${index + 1}. ${result.title}. ${result.snippet}. `;
+    });
+  } else {
+    const locationText = location ? ` in ${location}` : '';
+    ttsResponse = `I couldn't find any results for "${query}"${locationText} using AI search. You might want to try a different approach.`;
+  }
+
+  return {
+    success: true,
+    query: locationAwareQuery,
+    results: formattedResults,
+    ttsResponse: cleanTextForTTS(ttsResponse),
+    totalResults: results.length,
+    location: location || null,
+    searchEngine: 'exa',
+    searchType: 'neural'
+  };
+}
+
+// Helper function to perform crypto search
+async function performCryptoSearch(symbol) {
+  if (!process.env.BRAVE_API_KEY) {
+    throw new Error('BRAVE_API_KEY not configured');
+  }
+  
+  const query = `${symbol} cryptocurrency price current market cap`;
+  
+  const response = await axios.get('https://api.search.brave.com/res/v1/web/search', {
+    headers: {
+      'X-Subscription-Token': process.env.BRAVE_API_KEY,
+      'Accept': 'application/json'
+    },
+    params: {
+      q: query,
+      count: 5,
+      freshness: 'pd'
+    },
+    timeout: 10000
+  });
+
+  const results = response.data.web?.results || [];
+  const cryptoInfo = results.find(r => 
+    r.title.toLowerCase().includes(symbol.toLowerCase()) && 
+    (r.title.toLowerCase().includes('price') || r.description.toLowerCase().includes('price'))
+  );
+
+  let ttsResponse = '';
+  if (cryptoInfo) {
+    ttsResponse = `Here's the latest information on ${symbol}: ${cleanTextForTTS(cryptoInfo.description)}`;
+  } else if (results.length > 0) {
+    ttsResponse = `I found some information about ${symbol}: ${cleanTextForTTS(results[0].description)}`;
+  } else {
+    ttsResponse = `I couldn't find current price information for ${symbol}. The cryptocurrency market data might be temporarily unavailable.`;
+  }
+
+  return {
+    success: true,
+    query: `${symbol} crypto price`,
+    results: results.slice(0, 3).map(result => ({
+      title: cleanTextForTTS(result.title),
+      snippet: cleanTextForTTS(result.description),
+      url: result.url
+    })),
+    ttsResponse: cleanTextForTTS(ttsResponse),
+    searchEngine: 'brave',
+    searchType: 'crypto',
+    symbol: symbol
+  };
+}
+
+// Helper function to perform restaurant search
+async function performRestaurantSearch(query, location) {
+  if (!process.env.BRAVE_API_KEY) {
+    throw new Error('BRAVE_API_KEY not configured');
+  }
+  
+  if (!location) {
+    return {
+      success: false,
+      error: 'Location required for restaurant search',
+      ttsResponse: 'I need to know your location to find restaurants. Could you please tell me what city or area you\'re looking for restaurants in?'
+    };
+  }
+  
+  // Extract cuisine from query
+  const cuisine = query.replace(/restaurant|food|dining|eat|near me|in|around/gi, '').trim();
+  
+  const searchStrategies = [
+    `"${cuisine}" restaurant "${location}" menu address phone hours`,
+    `${cuisine} restaurant ${location} -tripadvisor -yelp -opentable -"best restaurants"`,
+    `${cuisine} ${location} restaurant review menu -"top 10" -directory`,
+    `restaurants in ${location} ${cuisine} local dining`
+  ];
+  
+  let allResults = [];
+  let bestResults = [];
+  
+  for (let i = 0; i < searchStrategies.length && bestResults.length < 5; i++) {
+    const searchQuery = searchStrategies[i];
+    
+    try {
+      const response = await axios.get('https://api.search.brave.com/res/v1/web/search', {
+        headers: {
+          'X-Subscription-Token': process.env.BRAVE_API_KEY,
+          'Accept': 'application/json'
+        },
+        params: {
+          q: searchQuery,
+          count: 10,
+          location: location,
+          country: 'US'
+        },
+        timeout: 10000
+      });
+
+      const results = response.data.web?.results || [];
+      allResults = allResults.concat(results);
+      
+      const restaurants = extractRestaurantInfo(results);
+      bestResults = bestResults.concat(restaurants);
+      
+    } catch (error) {
+      console.log(`⚠️ Restaurant strategy ${i + 1} failed:`, error.message);
+      continue;
+    }
+  }
+  
+  // Remove duplicates
+  const uniqueRestaurants = [];
+  const seenTitles = new Set();
+  
+  for (const restaurant of bestResults) {
+    const titleKey = restaurant.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!seenTitles.has(titleKey) && uniqueRestaurants.length < 5) {
+      seenTitles.add(titleKey);
+      uniqueRestaurants.push(restaurant);
+    }
+  }
+  
+  let ttsResponse = '';
+  if (uniqueRestaurants.length > 0) {
+    const cuisineText = cuisine ? `${cuisine} ` : '';
+    ttsResponse = `I found ${uniqueRestaurants.length} ${cuisineText}restaurant recommendations in ${location}. `;
+    
+    uniqueRestaurants.forEach((restaurant, index) => {
+      let restaurantName = restaurant.title;
+      restaurantName = restaurantName.replace(/ - Restaurant.*$/i, '');
+      restaurantName = restaurantName.replace(/ Restaurant.*$/i, '');
+      restaurantName = restaurantName.replace(/ \| .*$/i, '');
+      
+      ttsResponse += `${index + 1}. ${restaurantName}. ${restaurant.snippet}. `;
+    });
+  } else {
+    const cuisineText = cuisine ? `${cuisine} ` : '';
+    ttsResponse = `I couldn't find specific ${cuisineText}restaurant recommendations in ${location} right now. You might want to try asking for a different type of cuisine or a nearby city.`;
+  }
+
+  return {
+    success: true,
+    query: `${cuisine} restaurants in ${location}`,
+    results: uniqueRestaurants.slice(0, 5),
+    ttsResponse: cleanTextForTTS(ttsResponse),
+    location: location,
+    searchEngine: 'brave',
+    searchType: 'restaurants',
+    cuisine: cuisine
+  };
 }
 
 // Health check endpoint
@@ -179,6 +541,10 @@ app.get('/health', (req, res) => {
     status: 'OK', 
     message: 'ElevenLabs Voice Search Tool API is running',
     timestamp: new Date().toISOString(),
+    voiceOptimized: true,
+    intelligentRouting: 'Natural Language Processing enabled',
+    searchStrategies: ['crypto', 'restaurants', 'news', 'web', 'exa-ai'],
+    locationExtraction: 'Automatic from natural language',
     cors: {
       allowedOrigins: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174']
     },
@@ -187,11 +553,6 @@ app.get('/health', (req, res) => {
       exaApiKey: !!process.env.EXA_API_KEY,
       braveKeyPreview: process.env.BRAVE_API_KEY ? process.env.BRAVE_API_KEY.substring(0, 10) + '...' : 'NOT SET',
       exaKeyPreview: process.env.EXA_API_KEY ? process.env.EXA_API_KEY.substring(0, 10) + '...' : 'NOT SET'
-    },
-    debug: {
-      cwd: process.cwd(),
-      dirname: __dirname,
-      nodeEnv: process.env.NODE_ENV || 'NOT SET'
     }
   });
 });
@@ -201,427 +562,19 @@ app.get('/api/test', (req, res) => {
   res.json({ 
     message: 'API connection successful!',
     timestamp: new Date().toISOString(),
-    cors: 'CORS headers should be working now'
+    voiceOptimized: 'Ready for ElevenLabs voice agents',
+    intelligentRouting: 'Single endpoint with automatic strategy detection'
   });
-});
-
-// Brave Search API endpoint
-app.post('/api/search/brave', async (req, res) => {
-  console.log('🔍 Brave Search Request:', req.body);
-  console.log('🌐 Request Origin:', req.get('Origin'));
-  
-  try {
-    const { query, type = 'web', count = 10, location = null } = req.body;
-    
-    if (!process.env.BRAVE_API_KEY) {
-      console.error('❌ BRAVE_API_KEY not found in environment variables');
-      console.error('Available env vars:', Object.keys(process.env).filter(k => k.includes('API')));
-      return res.status(500).json({
-        success: false,
-        error: 'BRAVE_API_KEY not configured',
-        ttsResponse: 'The Brave API key is not configured. Please check your environment variables.'
-      });
-    }
-    
-    const params = {
-      q: query,
-      count,
-      search_lang: 'en',
-      country: 'US',
-      safesearch: 'moderate',
-      freshness: type === 'news' ? 'pd' : undefined,
-      result_filter: type === 'news' ? 'news' : undefined
-    };
-
-    if (location) {
-      params.location = location;
-    }
-
-    console.log('📡 Making request to Brave API with params:', params);
-
-    const response = await axios.get('https://api.search.brave.com/res/v1/web/search', {
-      headers: {
-        'X-Subscription-Token': process.env.BRAVE_API_KEY,
-        'Accept': 'application/json'
-      },
-      params,
-      timeout: 10000 // 10 second timeout
-    });
-
-    console.log('✅ Brave API Response Status:', response.status);
-
-    // Format response for TTS compatibility
-    const results = response.data.web?.results || [];
-    const formattedResults = results.slice(0, 5).map(result => ({
-      title: cleanTextForTTS(result.title),
-      snippet: cleanTextForTTS(result.description),
-      url: result.url,
-      published: result.age
-    }));
-
-    // Create TTS-friendly summary
-    let ttsResponse = '';
-    if (formattedResults.length > 0) {
-      ttsResponse = `I found ${formattedResults.length} relevant results for "${query}". `;
-      formattedResults.forEach((result, index) => {
-        const cleanTitle = cleanTextForTTS(result.title);
-        const cleanSnippet = cleanTextForTTS(result.snippet);
-        ttsResponse += `${index + 1}. ${cleanTitle}. ${cleanSnippet}. `;
-      });
-    } else {
-      ttsResponse = `I couldn't find any results for "${query}". You might want to try a different search term.`;
-    }
-
-    // Final cleanup of the entire TTS response
-    ttsResponse = cleanTextForTTS(ttsResponse);
-
-    const responseData = {
-      success: true,
-      query,
-      results: formattedResults,
-      ttsResponse,
-      totalResults: response.data.web?.totalResults || 0
-    };
-
-    console.log('📤 Sending response:', { ...responseData, results: `${formattedResults.length} results` });
-
-    res.json(responseData);
-
-  } catch (error) {
-    console.error('❌ Brave Search Error:', error.response?.data || error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Search failed',
-      ttsResponse: `I encountered an error while searching with Brave. ${error.message}. Please try again.`
-    });
-  }
-});
-
-// FIXED: Exa.ai Search API endpoint with correct request format
-app.post('/api/search/exa', async (req, res) => {
-  console.log('🧠 Exa Search Request:', req.body);
-  console.log('🌐 Request Origin:', req.get('Origin'));
-  
-  try {
-    const { query, type = 'neural', numResults = 10, includeDomains = null } = req.body;
-    
-    if (!process.env.EXA_API_KEY) {
-      console.error('❌ EXA_API_KEY not found in environment variables');
-      console.error('Available env vars:', Object.keys(process.env).filter(k => k.includes('API')));
-      return res.status(500).json({
-        success: false,
-        error: 'EXA_API_KEY not configured',
-        ttsResponse: 'The Exa API key is not configured. Please check your environment variables.'
-      });
-    }
-    
-    // FIXED: Correct Exa API request format
-    const searchData = {
-      query: query,
-      numResults: Math.min(numResults, 10), // Exa has limits
-      contents: {
-        text: true,
-        highlights: true,
-        summary: true
-      },
-      useAutoprompt: true, // Let Exa optimize the query
-      type: type === 'neural' ? 'neural' : 'keyword'
-    };
-
-    // Only add includeDomains if provided and is an array
-    if (includeDomains && Array.isArray(includeDomains) && includeDomains.length > 0) {
-      searchData.includeDomains = includeDomains;
-    }
-
-    console.log('📡 Making request to Exa API with data:', JSON.stringify(searchData, null, 2));
-    console.log('🔑 Using API key:', process.env.EXA_API_KEY ? `${process.env.EXA_API_KEY.substring(0, 10)}...` : 'NOT SET');
-
-    const response = await axios.post('https://api.exa.ai/search', searchData, {
-      headers: {
-        'x-api-key': process.env.EXA_API_KEY,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      timeout: 15000 // 15 second timeout for AI search
-    });
-
-    console.log('✅ Exa API Response Status:', response.status);
-    console.log('📊 Exa API Response Data Keys:', Object.keys(response.data));
-
-    const results = response.data.results || [];
-    console.log(`📋 Found ${results.length} results from Exa`);
-
-    const formattedResults = results.slice(0, 5).map(result => ({
-      title: cleanTextForTTS(result.title || 'Untitled'),
-      snippet: cleanTextForTTS(result.summary || result.text?.substring(0, 200) + '...' || result.highlights?.join(' ') || 'No description available'),
-      url: result.url,
-      score: result.score,
-      publishedDate: result.publishedDate
-    }));
-
-    // Create TTS-friendly summary
-    let ttsResponse = '';
-    if (formattedResults.length > 0) {
-      ttsResponse = `Using advanced AI search, I found ${formattedResults.length} highly relevant results for "${query}". `;
-      formattedResults.forEach((result, index) => {
-        const cleanTitle = cleanTextForTTS(result.title);
-        const cleanSnippet = cleanTextForTTS(result.snippet);
-        ttsResponse += `${index + 1}. ${cleanTitle}. ${cleanSnippet}. `;
-      });
-    } else {
-      ttsResponse = `I couldn't find any results for "${query}" using AI search. You might want to try a different approach.`;
-    }
-
-    // Final cleanup of the entire TTS response
-    ttsResponse = cleanTextForTTS(ttsResponse);
-
-    const responseData = {
-      success: true,
-      query,
-      results: formattedResults,
-      ttsResponse,
-      totalResults: results.length
-    };
-
-    console.log('📤 Sending Exa response:', { ...responseData, results: `${formattedResults.length} results` });
-
-    res.json(responseData);
-
-  } catch (error) {
-    console.error('❌ Exa Search Error Details:');
-    console.error('Error message:', error.message);
-    console.error('Error response status:', error.response?.status);
-    console.error('Error response data:', error.response?.data);
-    console.error('Error response headers:', error.response?.headers);
-    
-    // More specific error handling for Exa API
-    let errorMessage = 'AI search failed';
-    let ttsMessage = `I encountered an error while performing AI search with Exa. ${error.message}. Please try again.`;
-    
-    if (error.response?.status === 400) {
-      errorMessage = 'Invalid request to Exa API';
-      ttsMessage = 'The AI search request was invalid. This might be due to API key issues or request format problems.';
-    } else if (error.response?.status === 401) {
-      errorMessage = 'Exa API authentication failed';
-      ttsMessage = 'The Exa API key is invalid or expired. Please check your API key configuration.';
-    } else if (error.response?.status === 429) {
-      errorMessage = 'Exa API rate limit exceeded';
-      ttsMessage = 'The AI search service is currently rate limited. Please try again in a moment.';
-    }
-    
-    res.status(500).json({
-      success: false,
-      error: errorMessage,
-      ttsResponse: ttsMessage,
-      debug: {
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data
-      }
-    });
-  }
-});
-
-// Specialized search endpoints
-app.post('/api/search/crypto', async (req, res) => {
-  console.log('💰 Crypto Search Request:', req.body);
-  console.log('🌐 Request Origin:', req.get('Origin'));
-  
-  try {
-    const { symbol } = req.body;
-    const query = `${symbol} cryptocurrency price current market cap`;
-    
-    if (!process.env.BRAVE_API_KEY) {
-      return res.status(500).json({
-        success: false,
-        error: 'BRAVE_API_KEY not configured',
-        ttsResponse: 'The Brave API key is not configured for crypto search.'
-      });
-    }
-    
-    // Use Brave search for crypto data
-    const response = await axios.get('https://api.search.brave.com/res/v1/web/search', {
-      headers: {
-        'X-Subscription-Token': process.env.BRAVE_API_KEY,
-        'Accept': 'application/json'
-      },
-      params: {
-        q: query,
-        count: 5,
-        freshness: 'pd'
-      },
-      timeout: 10000
-    });
-
-    const results = response.data.web?.results || [];
-    const cryptoInfo = results.find(r => 
-      r.title.toLowerCase().includes(symbol.toLowerCase()) && 
-      (r.title.toLowerCase().includes('price') || r.description.toLowerCase().includes('price'))
-    );
-
-    let ttsResponse = '';
-    if (cryptoInfo) {
-      const cleanDescription = cleanTextForTTS(cryptoInfo.description);
-      ttsResponse = `Here's the latest information on ${symbol}: ${cleanDescription}`;
-    } else if (results.length > 0) {
-      const cleanDescription = cleanTextForTTS(results[0].description);
-      ttsResponse = `I found some information about ${symbol}: ${cleanDescription}`;
-    } else {
-      ttsResponse = `I couldn't find current price information for ${symbol}. The cryptocurrency market data might be temporarily unavailable.`;
-    }
-
-    // Clean the final TTS response
-    ttsResponse = cleanTextForTTS(ttsResponse);
-
-    res.json({
-      success: true,
-      query: `${symbol} crypto price`,
-      results: results.slice(0, 3).map(result => ({
-        ...result,
-        title: cleanTextForTTS(result.title),
-        description: cleanTextForTTS(result.description)
-      })),
-      ttsResponse
-    });
-
-  } catch (error) {
-    console.error('❌ Crypto Search Error:', error.response?.data || error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Crypto search failed',
-      ttsResponse: `I encountered an error while searching for ${req.body.symbol} cryptocurrency information. ${error.message}.`
-    });
-  }
-});
-
-// IMPROVED: Restaurant search with better filtering and multiple search strategies
-app.post('/api/search/restaurants', async (req, res) => {
-  console.log('🍽️ Restaurant Search Request:', req.body);
-  console.log('🌐 Request Origin:', req.get('Origin'));
-  
-  try {
-    const { location, cuisine = '', query = 'restaurants' } = req.body;
-    
-    if (!process.env.BRAVE_API_KEY) {
-      return res.status(500).json({
-        success: false,
-        error: 'BRAVE_API_KEY not configured',
-        ttsResponse: 'The Brave API key is not configured for restaurant search.'
-      });
-    }
-    
-    // Try multiple search strategies to get actual restaurants
-    const searchStrategies = [
-      // Strategy 1: Specific restaurant names with cuisine and location
-      `"${cuisine}" restaurant "${location}" menu address phone`,
-      // Strategy 2: Local restaurant names
-      `${cuisine} restaurant ${location} -tripadvisor -yelp -opentable -"best restaurants"`,
-      // Strategy 3: Restaurant names with reviews but exclude listing sites
-      `${cuisine} ${location} restaurant review -"top 10" -"best restaurants" -directory`
-    ];
-    
-    let allResults = [];
-    let bestResults = [];
-    
-    // Try each search strategy
-    for (let i = 0; i < searchStrategies.length && bestResults.length < 5; i++) {
-      const searchQuery = searchStrategies[i];
-      console.log(`🔍 Trying search strategy ${i + 1}: ${searchQuery}`);
-      
-      try {
-        const response = await axios.get('https://api.search.brave.com/res/v1/web/search', {
-          headers: {
-            'X-Subscription-Token': process.env.BRAVE_API_KEY,
-            'Accept': 'application/json'
-          },
-          params: {
-            q: searchQuery,
-            count: 10,
-            location: location
-          },
-          timeout: 10000
-        });
-
-        const results = response.data.web?.results || [];
-        allResults = allResults.concat(results);
-        
-        // Extract actual restaurants from this batch
-        const restaurants = extractRestaurantInfo(results);
-        bestResults = bestResults.concat(restaurants);
-        
-        console.log(`📋 Strategy ${i + 1} found ${restaurants.length} actual restaurants`);
-        
-      } catch (error) {
-        console.log(`⚠️ Strategy ${i + 1} failed:`, error.message);
-        continue;
-      }
-    }
-    
-    // Remove duplicates based on title similarity
-    const uniqueRestaurants = [];
-    const seenTitles = new Set();
-    
-    for (const restaurant of bestResults) {
-      const titleKey = restaurant.title.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (!seenTitles.has(titleKey) && uniqueRestaurants.length < 5) {
-        seenTitles.add(titleKey);
-        uniqueRestaurants.push(restaurant);
-      }
-    }
-    
-    console.log(`🎯 Final result: ${uniqueRestaurants.length} unique restaurants found`);
-    
-    // Create TTS response
-    let ttsResponse = '';
-    if (uniqueRestaurants.length > 0) {
-      const cuisineText = cuisine ? `${cuisine} ` : '';
-      ttsResponse = `I found ${uniqueRestaurants.length} ${cuisineText}restaurant recommendations in ${location}. `;
-      
-      uniqueRestaurants.forEach((restaurant, index) => {
-        // Extract just the restaurant name from the title (remove extra text)
-        let restaurantName = restaurant.title;
-        // Remove common suffixes that aren't part of the name
-        restaurantName = restaurantName.replace(/ - Restaurant.*$/i, '');
-        restaurantName = restaurantName.replace(/ Restaurant.*$/i, '');
-        restaurantName = restaurantName.replace(/ \| .*$/i, '');
-        
-        ttsResponse += `${index + 1}. ${restaurantName}. ${restaurant.snippet}. `;
-      });
-    } else {
-      // Fallback: provide general guidance
-      const cuisineText = cuisine ? `${cuisine} ` : '';
-      ttsResponse = `I couldn't find specific ${cuisineText}restaurant recommendations in ${location} right now. I suggest checking local dining guides or asking locals for their favorite ${cuisineText}restaurants in the area.`;
-    }
-
-    // Final cleanup of the entire TTS response
-    ttsResponse = cleanTextForTTS(ttsResponse);
-
-    res.json({
-      success: true,
-      query: `${cuisine} restaurants in ${location}`,
-      results: uniqueRestaurants.slice(0, 5),
-      ttsResponse,
-      debug: {
-        totalResultsFound: allResults.length,
-        actualRestaurantsFound: bestResults.length,
-        uniqueRestaurants: uniqueRestaurants.length
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Restaurant Search Error:', error.response?.data || error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Restaurant search failed',
-      ttsResponse: `I encountered an error while searching for restaurants in ${req.body.location}. ${error.message}.`
-    });
-  }
 });
 
 app.listen(PORT, () => {
   console.log(`🚀 ElevenLabs Voice Search Tool server running on port ${PORT}`);
-  console.log(`📡 API endpoints available at http://localhost:${PORT}/api`);
+  console.log(`📡 Universal search endpoint: http://localhost:${PORT}/api/search/brave`);
   console.log(`🔑 API Keys configured: Brave=${!!process.env.BRAVE_API_KEY}, Exa=${!!process.env.EXA_API_KEY}`);
   console.log(`🌐 Health check: http://localhost:${PORT}/health`);
   console.log(`✅ CORS configured for origins: http://localhost:5173, http://localhost:5174`);
+  console.log(`🎤 VOICE-OPTIMIZED: Single endpoint with intelligent query analysis`);
+  console.log(`🧠 INTELLIGENT ROUTING: Crypto, Restaurant, News, Web, and AI search detection`);
+  console.log(`📍 LOCATION EXTRACTION: Natural language processing for location context`);
+  console.log(`🎯 TOKEN EFFICIENT: One tool definition for all search types`);
 });

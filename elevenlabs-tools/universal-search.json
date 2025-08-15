@@ -1,0 +1,35 @@
+{
+  "type": "webhook",
+  "name": "web_search",
+  "description": "Search the web for any real-time information including restaurants, news, events, cryptocurrency prices, weather, sports scores, and general queries. Automatically detects search intent and location from natural language queries like 'pizza near me', 'Bitcoin price', 'news in Chicago', etc. Returns voice-optimized responses.",
+  "api_schema": {
+    "url": "http://localhost:3000/api/search/brave",
+    "method": "POST",
+    "path_params_schema": [],
+    "query_params_schema": [],
+    "request_body_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The user's search query in natural language. The backend will automatically detect intent, extract location, and choose the best search strategy."
+        }
+      },
+      "required": ["query"]
+    },
+    "request_headers": [
+      {
+        "key": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "auth_connection": null
+  },
+  "response_timeout_secs": 20,
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {}
+  },
+  "assignments": [],
+  "disable_interruptions": false,
+  "force_pre_tool_speech": "auto"
+}

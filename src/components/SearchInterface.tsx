@@ -1,158 +1,259 @@
-import React, { useState } from 'react';
-import { Search, Globe, Brain, TrendingUp, MapPin, Loader2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Mic, MicOff, Search, MapPin, Loader2 } from 'lucide-react';
+import { searchAPI } from '../utils/api';
+import type { SearchResult } from '../utils/api';
 
 interface SearchInterfaceProps {
-  onSearch: (searchData: any) => void;
-  isLoading: boolean;
+  onResults: (results: SearchResult[], ttsResponse: string, query: string) => void;
+  onError: (error: string) => void;
+  isListening: boolean;
+  onToggleListening: () => void;
 }
 
-const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading }) => {
+export default function SearchInterface({ 
+  onResults, 
+  onError, 
+  isListening, 
+  onToggleListening 
+}: SearchInterfaceProps) {
   const [query, setQuery] = useState('');
-  const [engine, setEngine] = useState<'brave' | 'exa'>('brave');
-  const [searchType, setSearchType] = useState<'web' | 'crypto' | 'restaurants' | 'news'>('web');
+  const [isLoading, setIsLoading] = useState(false);
+  const [searchProvider, setSearchProvider] = useState<'brave' | 'exa'>('brave');
+  const [searchType, setSearchType] = useState('web');
   const [location, setLocation] = useState('');
-  const [cuisine, setCuisine] = useState('');
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [detectedLocation, setDetectedLocation] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus input on mount
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, []);
+
+  // Detect user's location
+  const detectLocation = async () => {
+    setIsDetectingLocation(true);
+    try {
+      if (!navigator.geolocation) {
+        throw new Error('Geolocation is not supported by this browser');
+      }
+
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 300000 // 5 minutes
+        });
+      });
+
+      // Reverse geocoding using a free service
+      const response = await fetch(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${position.coords.latitude}&longitude=${position.coords.longitude}&localityLanguage=en`
+      );
+      
+      if (!response.ok) throw new Error('Failed to get location name');
+      
+      const data = await response.json();
+      const locationName = data.city || data.locality || data.principalSubdivision || 'Unknown location';
+      
+      setDetectedLocation(locationName);
+      setLocation(locationName);
+      
+    } catch (error) {
+      console.error('Location detection failed:', error);
+      onError(`Location detection failed: ${error.message}`);
+    } finally {
+      setIsDetectingLocation(false);
+    }
+  };
+
+  const handleSearch = async (searchQuery: string = query) => {
+    if (!searchQuery.trim()) return;
+
+    setIsLoading(true);
+    try {
+      let results;
+      const effectiveLocation = location.trim() || detectedLocation.trim();
+
+      if (searchProvider === 'brave') {
+        // Check if this is a restaurant search
+        const isRestaurantQuery = searchQuery.toLowerCase().includes('restaurant') || 
+                                 searchQuery.toLowerCase().includes('food') ||
+                                 searchQuery.toLowerCase().includes('dining') ||
+                                 searchType === 'restaurants';
+
+        if (isRestaurantQuery && effectiveLocation) {
+          // Use specialized restaurant search
+          const cuisine = searchQuery.replace(/restaurant|food|dining|in|near/gi, '').trim();
+          results = await searchAPI.restaurants(effectiveLocation, cuisine, searchQuery);
+        } else {
+          // Use general Brave search with location
+          results = await searchAPI.brave(searchQuery, searchType, effectiveLocation);
+        }
+      } else {
+        // Exa search - enhance query with location if provided
+        const enhancedQuery = effectiveLocation ? 
+          `${searchQuery} in ${effectiveLocation}` : 
+          searchQuery;
+        results = await searchAPI.exa(enhancedQuery, searchType);
+      }
+
+      if (results.success) {
+        onResults(results.results, results.ttsResponse, searchQuery);
+      } else {
+        onError(results.error || 'Search failed');
+      }
+    } catch (error) {
+      console.error('Search error:', error);
+      onError(`Search failed: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim()) return;
-
-    const searchData: any = {
-      query: query.trim(),
-      engine,
-      type: searchType
-    };
-
-    if (searchType === 'restaurants') {
-      searchData.location = location || 'New York';
-      searchData.cuisine = cuisine;
-    }
-
-    if (searchType === 'crypto') {
-      searchData.symbol = query.trim();
-    }
-
-    onSearch(searchData);
+    handleSearch();
   };
 
-  const searchTypeOptions = [
-    { value: 'web', label: 'Web Search', icon: Globe, desc: 'General web search' },
-    { value: 'crypto', label: 'Cryptocurrency', icon: TrendingUp, desc: 'Crypto prices & info' },
-    { value: 'restaurants', label: 'Restaurants', icon: MapPin, desc: 'Local dining options' },
-    { value: 'news', label: 'News', icon: Search, desc: 'Latest news & events' }
-  ];
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSearch();
+    }
+  };
 
   return (
-    <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-8 border border-white/20">
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Search Engine Selection */}
-        <div className="flex space-x-4">
+    <div className="w-full max-w-4xl mx-auto space-y-6">
+      {/* Search Provider Selection */}
+      <div className="flex justify-center space-x-4">
+        <button
+          onClick={() => setSearchProvider('brave')}
+          className={`px-4 py-2 rounded-lg font-medium transition-all ${
+            searchProvider === 'brave'
+              ? 'bg-primary text-white shadow-lg'
+              : 'bg-surface text-textSecondary hover:bg-border'
+          }`}
+        >
+          🦁 Brave Search
+        </button>
+        <button
+          onClick={() => setSearchProvider('exa')}
+          className={`px-4 py-2 rounded-lg font-medium transition-all ${
+            searchProvider === 'exa'
+              ? 'bg-secondary text-white shadow-lg'
+              : 'bg-surface text-textSecondary hover:bg-border'
+          }`}
+        >
+          🧠 Exa AI Search
+        </button>
+      </div>
+
+      {/* Search Type Selection */}
+      <div className="flex justify-center space-x-2 flex-wrap">
+        {['web', 'news', 'restaurants'].map((type) => (
           <button
-            type="button"
-            onClick={() => setEngine('brave')}
-            className={`flex-1 p-4 rounded-xl border-2 transition-all duration-200 ${
-              engine === 'brave'
-                ? 'border-purple-400 bg-purple-400/20 text-white'
-                : 'border-white/20 bg-white/5 text-gray-300 hover:border-white/40'
+            key={type}
+            onClick={() => setSearchType(type)}
+            className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${
+              searchType === type
+                ? 'bg-accent text-white'
+                : 'bg-surface text-textSecondary hover:bg-border'
             }`}
           >
-            <Globe className="h-6 w-6 mx-auto mb-2" />
-            <div className="font-semibold">Brave Search</div>
-            <div className="text-sm opacity-75">Fast & Private</div>
+            {type.charAt(0).toUpperCase() + type.slice(1)}
           </button>
-          
-          <button
-            type="button"
-            onClick={() => setEngine('exa')}
-            className={`flex-1 p-4 rounded-xl border-2 transition-all duration-200 ${
-              engine === 'exa'
-                ? 'border-cyan-400 bg-cyan-400/20 text-white'
-                : 'border-white/20 bg-white/5 text-gray-300 hover:border-white/40'
-            }`}
-          >
-            <Brain className="h-6 w-6 mx-auto mb-2" />
-            <div className="font-semibold">Exa.ai</div>
-            <div className="text-sm opacity-75">AI-Powered</div>
-          </button>
-        </div>
+        ))}
+      </div>
 
-        {/* Search Type Selection */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {searchTypeOptions.map(({ value, label, icon: Icon, desc }) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setSearchType(value as any)}
-              className={`p-3 rounded-lg border transition-all duration-200 text-left ${
-                searchType === value
-                  ? 'border-purple-400 bg-purple-400/20 text-white'
-                  : 'border-white/20 bg-white/5 text-gray-300 hover:border-white/40'
-              }`}
-            >
-              <Icon className="h-5 w-5 mb-1" />
-              <div className="font-medium text-sm">{label}</div>
-              <div className="text-xs opacity-75">{desc}</div>
-            </button>
-          ))}
-        </div>
-
-        {/* Search Input */}
-        <div className="relative">
+      {/* Location Input */}
+      <div className="flex space-x-2">
+        <div className="flex-1 relative">
+          <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-textSecondary w-5 h-5" />
           <input
             type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={
-              searchType === 'crypto' ? 'Enter cryptocurrency symbol (e.g., BTC, ETH)' :
-              searchType === 'restaurants' ? 'What type of food are you looking for?' :
-              'Enter your search query...'
-            }
-            className="w-full px-6 py-4 bg-white/10 border border-white/20 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent text-lg"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="Enter location (optional)"
+            className="w-full pl-10 pr-4 py-3 bg-surface border border-border rounded-xl text-text placeholder-textSecondary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
           />
-          <Search className="absolute right-4 top-1/2 transform -translate-y-1/2 h-6 w-6 text-gray-400" />
         </div>
-
-        {/* Additional Fields for Restaurant Search */}
-        {searchType === 'restaurants' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <input
-              type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="Location (e.g., New York, NY)"
-              className="px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-400"
-            />
-            <input
-              type="text"
-              value={cuisine}
-              onChange={(e) => setCuisine(e.target.value)}
-              placeholder="Cuisine type (optional)"
-              className="px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-400"
-            />
-          </div>
-        )}
-
-        {/* Submit Button */}
         <button
-          type="submit"
-          disabled={isLoading || !query.trim()}
-          className="w-full py-4 bg-gradient-to-r from-purple-500 to-cyan-500 text-white font-semibold rounded-xl hover:from-purple-600 hover:to-cyan-600 focus:outline-none focus:ring-2 focus:ring-purple-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center space-x-2"
+          onClick={detectLocation}
+          disabled={isDetectingLocation}
+          className="px-4 py-3 bg-secondary text-white rounded-xl hover:bg-secondary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+          title="Detect my location"
         >
-          {isLoading ? (
-            <>
-              <Loader2 className="h-5 w-5 animate-spin" />
-              <span>Searching...</span>
-            </>
+          {isDetectingLocation ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
           ) : (
-            <>
-              <Search className="h-5 w-5" />
-              <span>Search</span>
-            </>
+            <MapPin className="w-5 h-5" />
           )}
+          <span className="hidden sm:inline">
+            {isDetectingLocation ? 'Detecting...' : 'Auto'}
+          </span>
         </button>
+      </div>
+
+      {detectedLocation && (
+        <div className="text-center text-sm text-textSecondary">
+          📍 Detected location: {detectedLocation}
+        </div>
+      )}
+
+      {/* Main Search Interface */}
+      <form onSubmit={handleSubmit} className="relative">
+        <div className="flex space-x-2">
+          <div className="flex-1 relative">
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Ask me anything... (e.g., 'Italian restaurants near me', 'latest tech news')"
+              className="w-full pl-4 pr-16 py-4 bg-surface border border-border rounded-xl text-text placeholder-textSecondary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-lg"
+              disabled={isLoading}
+            />
+            <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex space-x-1">
+              <button
+                type="button"
+                onClick={onToggleListening}
+                className={`p-2 rounded-lg transition-all ${
+                  isListening
+                    ? 'bg-error text-white animate-pulse'
+                    : 'bg-primary text-white hover:bg-primary/90'
+                }`}
+                title={isListening ? 'Stop listening' : 'Start voice input'}
+              >
+                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              </button>
+            </div>
+          </div>
+          <button
+            type="submit"
+            disabled={isLoading || !query.trim()}
+            className="px-6 py-4 bg-primary text-white rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+          >
+            {isLoading ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <Search className="w-5 h-5" />
+            )}
+            <span className="hidden sm:inline">
+              {isLoading ? 'Searching...' : 'Search'}
+            </span>
+          </button>
+        </div>
       </form>
+
+      {/* Search Tips */}
+      <div className="text-center text-sm text-textSecondary space-y-1">
+        <p>💡 Try: "Best pizza restaurants in New York" or "Latest AI news"</p>
+        <p>🎯 Use location for better local results • 🎤 Click mic for voice search</p>
+      </div>
     </div>
   );
-};
-
-export default SearchInterface;
+}

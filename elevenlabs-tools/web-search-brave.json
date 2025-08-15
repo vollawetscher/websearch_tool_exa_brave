@@ -1,0 +1,52 @@
+{
+  "type": "webhook",
+  "name": "web_search_brave",
+  "description": "Search the web using Brave Search for real-time information including general queries, news, events, and location-based searches. Automatically extracts location from natural language queries like 'near me', 'in Chicago', etc. Returns TTS-optimized responses perfect for voice synthesis.",
+  "api_schema": {
+    "url": "http://localhost:3000/api/search/brave",
+    "method": "POST",
+    "path_params_schema": [],
+    "query_params_schema": [],
+    "request_body_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The search query from the user. Can include natural language location references like 'pizza near me' or 'hotels in San Francisco'"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["web", "news"],
+          "default": "web",
+          "description": "Type of search: 'web' for general searches, 'news' for recent news and events"
+        },
+        "location": {
+          "type": "string",
+          "description": "Optional explicit location. If not provided, the system will try to extract location from the query"
+        },
+        "count": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Number of results to return"
+        }
+      },
+      "required": ["query"]
+    },
+    "request_headers": [
+      {
+        "key": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "auth_connection": null
+  },
+  "response_timeout_secs": 20,
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {}
+  },
+  "assignments": [],
+  "disable_interruptions": false,
+  "force_pre_tool_speech": "auto"
+}
